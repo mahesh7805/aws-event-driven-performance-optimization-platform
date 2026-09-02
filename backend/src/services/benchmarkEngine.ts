@@ -27,8 +27,7 @@ export interface BenchmarkComparisonResult {
 }
 
 /**
- * Benchmark Engine for calculating real-time performance metrics
- * comparing Serial vs Parallel SQS/Lambda vs Parallel + Cache.
+ * Benchmark Engine calculating actual execution timestamps and speedup metrics.
  */
 export class BenchmarkEngine {
   private serialProcessor: SerialProcessor;
@@ -43,33 +42,42 @@ export class BenchmarkEngine {
 
   public async runComparison(options: RunBenchmarkOptions): Promise<BenchmarkComparisonResult> {
     const jobCount = Math.max(1, Math.min(200, options.jobCount));
-    const processingMs = options.jobProcessingMs ?? 150;
+    const processingMs = options.jobProcessingMs ?? 30;
 
-    // Reset cache stats before benchmark run
+    // Reset repository stats
     this.repo.resetStats();
 
-    // 1. Run Serial Baseline
+    // 1. Measure Serial Baseline Execution
+    const serialStartTime = Date.now();
     const serialRes = await this.serialProcessor.processBatch({
       jobCount,
       jobProcessingMs: processingMs,
     });
-    const serialDurationMs = serialRes.batch.totalDuration || jobCount * processingMs;
+    const serialDurationMs = Date.now() - serialStartTime;
 
-    // 2. Run Parallel SQS + Lambda Processing
+    // 2. Measure Decoupled Parallel SQS + Worker Processing
+    const parallelStartTime = Date.now();
     const parallelRes = await this.parallelProcessor.processBatch({
       jobCount,
       jobProcessingMs: processingMs,
     });
-    const parallelDurationMs = parallelRes.batch.totalDuration || processingMs * 1.2;
 
-    // 3. Run Cached Query Reads for all processed jobs
+    // Wait until all background worker tasks complete for accurate timestamp delta
+    let currentBatch = await this.repo.getBatch(parallelRes.batch.batchId);
+    while (currentBatch && currentBatch.completedJobs + currentBatch.failedJobs < jobCount) {
+      await new Promise((r) => setTimeout(r, 20));
+      currentBatch = await this.repo.getBatch(parallelRes.batch.batchId);
+    }
+    const parallelDurationMs = Math.max(1, Date.now() - parallelStartTime);
+
+    // 3. Measure Cache Read Latency for all batch jobs
     const cacheStartTime = Date.now();
     for (const job of parallelRes.jobs) {
       await this.cacheService.getJob(job.jobId);
     }
     const cachedDurationMs = Date.now() - cacheStartTime;
 
-    // Calculate real metrics
+    // Calculate empirical metrics from measured timestamps
     const rawImprovement = ((serialDurationMs - parallelDurationMs) / serialDurationMs) * 100;
     const improvementPercentage = Math.max(0, Math.round(rawImprovement * 10) / 10);
     const throughputJobsPerSec = Math.round((jobCount / (parallelDurationMs / 1000)) * 10) / 10;

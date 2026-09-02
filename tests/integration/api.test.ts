@@ -49,7 +49,20 @@ describe('Layer 6 & 7 - REST API & Benchmark Integration Tests', () => {
     const data = await res.json();
     expect(res.status).toBe(201);
     expect(data.batch.mode).toBe('PARALLEL');
-    expect(data.batch.completedJobs).toBe(3);
+    expect(data.batch.totalJobs).toBe(3);
+
+    // Poll for async completion
+    let completed = false;
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      const detailsRes = await fetch(`${BASE_URL}/batches/${data.batch.batchId}`);
+      const details = await detailsRes.json();
+      if (details.batch.completedJobs === 3) {
+        completed = true;
+        break;
+      }
+    }
+    expect(completed).toBe(true);
   });
 
   it('POST /api/benchmarks should run real comparison and return metrics', async () => {

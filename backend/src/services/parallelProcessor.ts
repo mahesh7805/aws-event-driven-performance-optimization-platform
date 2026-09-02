@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { SQSClient, SendMessageBatchCommand, SendMessageBatchRequestEntry } from '@aws-sdk/client-sqs';
 import { Job, Batch } from '../models/types.js';
 import { DataRepository } from '../repositories/repository.js';
 import { executeDeterministicWorkload } from './serialProcessor.js';
@@ -6,7 +7,7 @@ import { executeDeterministicWorkload } from './serialProcessor.js';
 export interface ParallelProcessorOptions {
   jobCount: number;
   jobProcessingMs?: number;
-  maxConcurrency?: number;
+  failJobId?: string; // Optional for failure testing
 }
 
 export interface SQSMessagePayload {
@@ -15,23 +16,30 @@ export interface SQSMessagePayload {
   jobIndex: number;
   totalJobs: number;
   processingMs: number;
+  isPoisonPill?: boolean;
 }
 
+const sqsClient = new SQSClient({
+  region: process.env.AWS_REGION || 'us-east-1',
+  endpoint: process.env.AWS_ENDPOINT || undefined,
+});
+
+const SQS_MAX_BATCH_SIZE = 10;
+
 /**
- * Parallel SQS + Lambda Worker Processor.
- * Handles job counts from 10 to 500+ with concurrent worker pool execution and real-time state tracking.
+ * Decoupled Event-Driven Parallel SQS Processor.
+ * Enqueues messages to SQS in chunks of max 10, returning batch ID immediately in QUEUED state.
+ * Workers update job status asynchronously in storage (DynamoDB / Repository).
  */
 export class ParallelProcessor {
   constructor(private repo: DataRepository) {}
 
   public async processBatch(options: ParallelProcessorOptions): Promise<{ batch: Batch; jobs: Job[] }> {
     const jobCount = Math.max(1, Math.min(500, options.jobCount));
-    const processingMs = options.jobProcessingMs ?? 50; // Optimized default processing per worker
-    const maxConcurrency = options.maxConcurrency ?? 50;
+    const processingMs = options.jobProcessingMs ?? 40;
 
     const batchId = `batch-parallel-${randomUUID()}`;
     const startedAt = new Date().toISOString();
-    const startTime = Date.now();
 
     const batch: Batch = {
       batchId,
@@ -44,37 +52,74 @@ export class ParallelProcessor {
 
     await this.repo.createBatch(batch);
 
-    // Step 1: Enqueue all SQS Messages in QUEUED state
-    const sqsQueue: SQSMessagePayload[] = [];
+    const jobs: Job[] = [];
+    const sqsMessages: SQSMessagePayload[] = [];
+
+    // Step 1: Initialize all jobs in QUEUED status
     for (let i = 1; i <= jobCount; i++) {
       const jobId = `job-${batchId}-${i}`;
-      const jobCreated = new Date().toISOString();
+      const isPoisonPill = options.failJobId === jobId || (options.failJobId === 'all' && i === 1);
 
-      await this.repo.createJob({
+      const job: Job = {
         jobId,
         batchId,
         status: 'QUEUED',
-        createdAt: jobCreated,
-      });
+        createdAt: new Date().toISOString(),
+      };
 
-      sqsQueue.push({
+      await this.repo.createJob(job);
+      jobs.push(job);
+
+      sqsMessages.push({
         jobId,
         batchId,
         jobIndex: i,
         totalJobs: jobCount,
         processingMs,
+        isPoisonPill,
       });
     }
 
-    // Step 2: Fan-out processing across simulated Lambda worker pool in concurrent chunks
-    const jobs: Job[] = [];
+    // Step 2: Enqueue to SQS in batches of max 10 (Strict AWS SendMessageBatch limit)
+    const queueUrl = process.env.SQS_QUEUE_URL;
 
-    // Helper to process a single SQS message worker execution
-    const processSingleMessage = async (msg: SQSMessagePayload): Promise<Job | null> => {
+    if (queueUrl) {
+      const entries: SendMessageBatchRequestEntry[] = sqsMessages.map((msg) => ({
+        Id: msg.jobId,
+        MessageBody: JSON.stringify(msg),
+      }));
+
+      for (let i = 0; i < entries.length; i += SQS_MAX_BATCH_SIZE) {
+        const batchChunk = entries.slice(i, i + SQS_MAX_BATCH_SIZE);
+        await sqsClient.send(
+          new SendMessageBatchCommand({
+            QueueUrl: queueUrl,
+            Entries: batchChunk,
+          })
+        );
+      }
+    }
+
+    // Step 3: Trigger decoupled asynchronous worker processing in background (non-blocking)
+    setImmediate(() => {
+      this.dispatchBackgroundWorkers(batchId, sqsMessages).catch(console.error);
+    });
+
+    // Return IMMEDIATELY while jobs are in QUEUED status (API does NOT process jobs synchronously)
+    return { batch, jobs };
+  }
+
+  /**
+   * Background Async Worker Pool.
+   * Simulates asynchronous SQS consumer worker handling in background when running locally.
+   */
+  private async dispatchBackgroundWorkers(batchId: string, messages: SQSMessagePayload[]): Promise<void> {
+    const maxConcurrency = 20;
+
+    const processSingleWorker = async (msg: SQSMessagePayload) => {
       // Check Idempotency Key
       if (this.repo.isProcessed(msg.jobId)) {
-        const existing = await this.repo.getJob(msg.jobId);
-        if (existing) return existing;
+        return;
       }
 
       const workerStartedAt = new Date().toISOString();
@@ -84,59 +129,54 @@ export class ParallelProcessor {
       });
 
       try {
-        // Execute deterministic workload in worker
+        if (msg.isPoisonPill) {
+          throw new Error(`Poison pill payload detected for job ${msg.jobId}`);
+        }
+
         const result = await executeDeterministicWorkload(msg.jobIndex, msg.processingMs);
         const workerCompletedAt = new Date().toISOString();
         const duration = Date.now() - new Date(workerStartedAt).getTime();
 
         this.repo.markProcessed(msg.jobId);
 
-        const updated = await this.repo.updateJob(msg.jobId, {
+        await this.repo.updateJob(msg.jobId, {
           status: 'COMPLETED',
           completedAt: workerCompletedAt,
           duration,
           result,
         });
 
-        if (updated) {
-          batch.completedJobs++;
-          await this.repo.updateBatch(batchId, { completedJobs: batch.completedJobs });
-          return updated;
+        const currentBatch = await this.repo.getBatch(batchId);
+        if (currentBatch) {
+          const completedJobs = currentBatch.completedJobs + 1;
+          const isFinished = completedJobs + currentBatch.failedJobs >= currentBatch.totalJobs;
+          await this.repo.updateBatch(batchId, {
+            completedJobs,
+            ...(isFinished ? { completedAt: new Date().toISOString(), totalDuration: Date.now() - new Date(currentBatch.startedAt).getTime() } : {}),
+          });
         }
       } catch (err: any) {
-        batch.failedJobs++;
-        await this.repo.updateBatch(batchId, { failedJobs: batch.failedJobs });
-        const failed = await this.repo.updateJob(msg.jobId, {
+        await this.repo.updateJob(msg.jobId, {
           status: 'FAILED',
           error: err.message || 'Worker processing failed',
         });
-        if (failed) return failed;
+
+        const currentBatch = await this.repo.getBatch(batchId);
+        if (currentBatch) {
+          const failedJobs = currentBatch.failedJobs + 1;
+          const isFinished = currentBatch.completedJobs + failedJobs >= currentBatch.totalJobs;
+          await this.repo.updateBatch(batchId, {
+            failedJobs,
+            ...(isFinished ? { completedAt: new Date().toISOString(), totalDuration: Date.now() - new Date(currentBatch.startedAt).getTime() } : {}),
+          });
+        }
       }
-      return null;
     };
 
-    // Execute messages in concurrency-bounded batches to prevent thread exhaustion for 500+ jobs
-    for (let i = 0; i < sqsQueue.length; i += maxConcurrency) {
-      const chunk = sqsQueue.slice(i, i + maxConcurrency);
-      const chunkResults = await Promise.all(chunk.map(processSingleMessage));
-      for (const res of chunkResults) {
-        if (res) jobs.push(res);
-      }
+    // Execute background worker pool in concurrent chunks
+    for (let i = 0; i < messages.length; i += maxConcurrency) {
+      const chunk = messages.slice(i, i + maxConcurrency);
+      await Promise.all(chunk.map(processSingleWorker));
     }
-
-    const totalDuration = Date.now() - startTime;
-    const completedAt = new Date().toISOString();
-
-    const updatedBatch = await this.repo.updateBatch(batchId, {
-      completedJobs: batch.completedJobs,
-      failedJobs: batch.failedJobs,
-      completedAt,
-      totalDuration,
-    });
-
-    return {
-      batch: updatedBatch || batch,
-      jobs,
-    };
   }
 }
