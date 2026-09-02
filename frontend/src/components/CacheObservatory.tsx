@@ -45,10 +45,10 @@ export const CacheObservatory: React.FC = () => {
         <div>
           <h2 className="text-lg font-semibold text-slate-900 flex items-center space-x-2">
             <Database className="h-5 w-5 text-teal-600" />
-            <span>In-Memory / Redis TTL Cache Observatory</span>
+            <span>In-Memory Read-Through TTL Cache Observatory</span>
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Deterministic TTL Read-Through Caching (`CACHE_TTL_SECONDS=60`). First lookup = MISS (DynamoDB Read), Second lookup of same key = HIT.
+            Application-Level In-Memory TTL Cache (`CACHE_TTL_SECONDS=60`). First lookup of a key = MISS (DB Read), subsequent lookups = HIT. (Cloud production interfaces with Amazon ElastiCache / Redis).
           </p>
         </div>
 

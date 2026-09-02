@@ -38,7 +38,7 @@ export const BenchmarkLab: React.FC<BenchmarkLabProps> = ({ onBenchmarkComplete 
             <span>Performance Benchmarking Laboratory</span>
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Real-time measured performance: Local Sequential Baseline vs AWS SQS + Lambda Fan-out vs Memory/Redis Cache.
+            Real-time measured performance: Local Sequential Baseline vs AWS SQS + Lambda Fan-out vs In-Memory/Redis TTL Cache.
           </p>
         </div>
 
@@ -156,7 +156,7 @@ export const BenchmarkLab: React.FC<BenchmarkLabProps> = ({ onBenchmarkComplete 
                   <th className="p-3">Execution Metric</th>
                   <th className="p-3">Serial Execution</th>
                   <th className="p-3">Parallel SQS + Lambda</th>
-                  <th className="p-3">Parallel + Redis Cache</th>
+                  <th className="p-3">Parallel + TTL Cache</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">

@@ -34,8 +34,8 @@ Many legacy applications process independent batch items sequentially inside a s
                 │
      ┌──────────┴──────────┐
      ▼                     ▼
-[ Redis Cache ]       [ SQS Queue ]
-  (Hit/Miss)               │
+[ In-Memory / Redis Cache ]  [ SQS Queue ]
+  (Hit/Miss Read-Through)       │
                            ▼
                  [ Lambda Worker Pool ]
                            │
