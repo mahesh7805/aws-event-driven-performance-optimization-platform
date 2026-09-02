@@ -9,6 +9,25 @@ export const createApp = () => {
   app.use(cors());
   app.use(express.json());
 
+  app.get('/', (_req, res) => {
+    res.json({
+      name: 'AWS Event-Driven Performance Optimization Platform API',
+      status: 'ONLINE',
+      version: '1.0.0',
+      endpoints: {
+        health: '/api/health',
+        serialBatch: 'POST /api/batches/serial',
+        parallelBatch: 'POST /api/batches/parallel',
+        getBatch: 'GET /api/batches/:batchId',
+        benchmarks: 'POST /api/benchmarks',
+        getJob: 'GET /api/jobs/:jobId',
+        cacheStats: 'GET /api/cache/stats',
+        simulateFailure: 'POST /api/failure-lab/simulate',
+      },
+      timestamp: new Date().toISOString(),
+    });
+  });
+
   app.get('/api/health', (_req, res) => {
     res.json({
       status: 'ok',
