@@ -4,6 +4,7 @@ import { SerialProcessor } from '../services/serialProcessor.js';
 import { ParallelProcessor } from '../services/parallelProcessor.js';
 import { CacheService } from '../services/cacheService.js';
 import { BenchmarkEngine } from '../services/benchmarkEngine.js';
+import { FailureLabService } from '../services/failureLab.js';
 
 export const apiRouter = Router();
 
@@ -11,6 +12,7 @@ const serialProcessor = new SerialProcessor(globalRepository);
 const parallelProcessor = new ParallelProcessor(globalRepository);
 const cacheService = new CacheService(globalRepository, 60);
 const benchmarkEngine = new BenchmarkEngine(globalRepository);
+const failureLabService = new FailureLabService(globalRepository);
 
 // POST /api/batches/serial
 apiRouter.post('/batches/serial', async (req: Request, res: Response) => {
@@ -99,9 +101,6 @@ apiRouter.get('/benchmarks/:benchmarkId', async (req: Request, res: Response) =>
 apiRouter.get('/jobs/:jobId', async (req: Request, res: Response) => {
   try {
     const result = await cacheService.getJob(req.params.jobId);
-    if (!result.job) {
-      return res.status(404).json({ error: 'Job not found' });
-    }
     res.json({
       job: result.job,
       cacheHit: result.hit,
@@ -120,59 +119,11 @@ apiRouter.get('/cache/stats', (_req: Request, res: Response) => {
 
 // POST /api/failure-lab/simulate
 apiRouter.post('/failure-lab/simulate', async (req: Request, res: Response) => {
-  const { scenario } = req.body;
-  const timestamp = new Date().toISOString();
-
-  switch (scenario) {
-    case 'worker-failure':
-      return res.json({
-        scenario: 'worker-failure',
-        status: 'RETRYING',
-        sqsAction: 'Visibility timeout expired -> SQS re-delivered message to Worker 2',
-        outcome: 'Successfully processed after SQS retry (1/3 max receive count)',
-        timestamp,
-      });
-    case 'duplicate-message':
-      return res.json({
-        scenario: 'duplicate-message',
-        status: 'SKIPPED',
-        sqsAction: 'Worker received duplicate SQS message ID msg-104',
-        outcome: 'Idempotency check intercepted request (jobId matched). Duplicate dropped.',
-        timestamp,
-      });
-    case 'processing-timeout':
-      return res.json({
-        scenario: 'processing-timeout',
-        status: 'TIMEOUT_RETRY',
-        sqsAction: 'Lambda worker execution exceeded 15s limit',
-        outcome: 'SQS returned message to queue. Concurrency limits prevented cascading backlog.',
-        timestamp,
-      });
-    case 'database-error':
-      return res.json({
-        scenario: 'database-error',
-        status: 'MOVED_TO_DLQ',
-        sqsAction: 'DynamoDB ProvisionedThroughputExceededException after 3 retries',
-        outcome: 'Message moved to SQS Dead Letter Queue (DLQ: aws-event-driven-dlq) for inspection.',
-        timestamp,
-      });
-    case 'poison-pill':
-      return res.json({
-        scenario: 'poison-pill',
-        status: 'ISOLATED_TO_DLQ',
-        sqsAction: 'Corrupted payload format detected by JSON schema parser in Lambda Worker',
-        outcome: 'Worker rejected message without processing. Sent to DLQ (MaxReceiveCount=3) to prevent queue poison loop.',
-        timestamp,
-      });
-    case 'throttling-backoff':
-      return res.json({
-        scenario: 'throttling-backoff',
-        status: 'BACKOFF_RETRY_SUCCESS',
-        sqsAction: 'DynamoDB 400 ProvisionedThroughputExceededException intercepted',
-        outcome: 'Applied Full Jitter Exponential Backoff (100ms → 200ms → 400ms). Retry 3 succeeded without data loss.',
-        timestamp,
-      });
-    default:
-      return res.status(400).json({ error: 'Invalid failure lab scenario' });
+  try {
+    const { scenario } = req.body;
+    const outcome = await failureLabService.simulateScenario(scenario);
+    res.json(outcome);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message || 'Invalid scenario' });
   }
 });

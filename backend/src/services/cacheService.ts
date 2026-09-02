@@ -18,30 +18,29 @@ export class CacheService {
     this.defaultTtlMs = ttlSeconds * 1000;
   }
 
-  public async getJob(jobId: string): Promise<{ job: Job | null; hit: boolean }> {
+  public async getJob(jobId: string): Promise<{ job: Job; hit: boolean }> {
     const key = `job:${jobId}`;
     const now = Date.now();
     const cached = this.cache.get(key);
 
     if (cached && cached.expiresAt > now) {
-      // CACHE HIT
+      // CACHE HIT - Key exists in memory and is not expired
       this.repo.recordCacheHit();
       return { job: { ...cached.data }, hit: true };
     }
 
-    // CACHE MISS
+    // CACHE MISS - Key not in memory or expired
     if (cached) {
       this.cache.delete(key); // Evict expired key
     }
 
     this.repo.recordCacheMiss();
 
-    // Query Database/Repository
-    const dbJob = await this.repo.getJob(jobId);
-    if (dbJob) {
-      // Store in Cache with TTL
-      this.setJob(dbJob);
-    }
+    // Query Database/Repository (fetches or creates job record)
+    const dbJob = await this.repo.getOrCreateJob(jobId);
+    
+    // Store in Cache with TTL
+    this.setJob(dbJob);
 
     return { job: dbJob, hit: false };
   }

@@ -1,4 +1,4 @@
-export type JobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+export type JobStatus = 'PENDING' | 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 export type ProcessingMode = 'SERIAL' | 'PARALLEL' | 'PARALLEL_CACHED';
 
 export interface Job {

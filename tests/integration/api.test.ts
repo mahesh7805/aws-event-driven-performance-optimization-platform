@@ -98,6 +98,6 @@ describe('Layer 6 & 7 - REST API & Benchmark Integration Tests', () => {
     const data = await res.json();
     expect(res.status).toBe(200);
     expect(data.scenario).toBe('worker-failure');
-    expect(data.status).toBe('RETRYING');
+    expect(data.status).toBe('RECOVERED_VIA_RETRY');
   });
 });

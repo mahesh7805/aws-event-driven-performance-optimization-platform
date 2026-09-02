@@ -12,7 +12,7 @@ export interface BatchResponse {
   jobs: Array<{
     jobId: string;
     batchId: string;
-    status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+    status: 'PENDING' | 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
     createdAt: string;
     startedAt?: string;
     completedAt?: string;
@@ -81,6 +81,12 @@ export async function runParallelBatch(jobCount: number, jobProcessingMs: number
     body: JSON.stringify({ jobCount, jobProcessingMs }),
   });
   if (!res.ok) throw new Error(`Parallel execution failed with status ${res.status}`);
+  return res.json();
+}
+
+export async function getBatchDetails(batchId: string): Promise<BatchResponse> {
+  const res = await fetch(`/api/batches/${batchId}`);
+  if (!res.ok) throw new Error(`Failed to fetch batch ${batchId}`);
   return res.json();
 }
 

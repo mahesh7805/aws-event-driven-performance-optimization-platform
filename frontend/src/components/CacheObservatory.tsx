@@ -1,35 +1,39 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Database, Zap, RefreshCcw, ShieldCheck } from 'lucide-react';
+import { Database, Zap, RefreshCcw, ShieldCheck, AlertCircle } from 'lucide-react';
 import { queryJobWithCache, getCacheStats, CacheStatsResponse } from '../services/apiClient';
 
 export const CacheObservatory: React.FC = () => {
-  const [testJobId, setTestJobId] = useState<string>('job-sample-101');
-  const [stats, setStats] = useState<CacheStatsResponse>({ hits: 2, misses: 1, hitRate: 0.67, databaseReads: 1 });
-  const [lastQueryResult, setLastQueryResult] = useState<{ cacheHit: boolean; duration: number } | null>(null);
+  const [testJobId, setTestJobId] = useState<string>('job-123');
+  const [stats, setStats] = useState<CacheStatsResponse>({ hits: 0, misses: 0, hitRate: 0, databaseReads: 0 });
+  const [lastQueryResult, setLastQueryResult] = useState<{ cacheHit: boolean; duration: number; jobId: string } | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchStats = async () => {
+    try {
+      const currentStats = await getCacheStats();
+      setStats(currentStats);
+    } catch (e) {
+      console.error('Failed to fetch cache stats', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchStats();
+  }, []);
 
   const handleTestQuery = async () => {
     setLoading(true);
+    setError(null);
     const start = Date.now();
     try {
-      const res = await queryJobWithCache(testJobId);
+      const res = await queryJobWithCache(testJobId.trim());
       const duration = Date.now() - start;
-      setLastQueryResult({ cacheHit: res.cacheHit, duration });
-
-      const updatedStats = await getCacheStats();
-      setStats(updatedStats);
-    } catch {
-      // Fallback local simulation if backend job id is mock
-      const duration = lastQueryResult?.cacheHit ? 4 : 42;
-      const isHit = lastQueryResult ? !lastQueryResult.cacheHit : false;
-      setLastQueryResult({ cacheHit: isHit, duration });
-      setStats((prev) => ({
-        hits: isHit ? prev.hits + 1 : prev.hits,
-        misses: isHit ? prev.misses : prev.misses + 1,
-        databaseReads: isHit ? prev.databaseReads : prev.databaseReads + 1,
-        hitRate: parseFloat(((prev.hits + (isHit ? 1 : 0)) / (prev.hits + prev.misses + 1)).toFixed(2)),
-      }));
+      setLastQueryResult({ cacheHit: res.cacheHit, duration, jobId: testJobId.trim() });
+      await fetchStats();
+    } catch (err: any) {
+      setError(err.message || 'Cache query failed');
     } finally {
       setLoading(false);
     }
@@ -41,10 +45,10 @@ export const CacheObservatory: React.FC = () => {
         <div>
           <h2 className="text-lg font-semibold text-slate-900 flex items-center space-x-2">
             <Database className="h-5 w-5 text-teal-600" />
-            <span>Redis In-Memory Cache Observatory</span>
+            <span>In-Memory / Redis TTL Cache Observatory</span>
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Read-through caching pattern with TTL expiration (`CACHE_TTL_SECONDS=60`).
+            Deterministic TTL Read-Through Caching (`CACHE_TTL_SECONDS=60`). First lookup = MISS (DynamoDB Read), Second lookup of same key = HIT.
           </p>
         </div>
 
@@ -58,9 +62,12 @@ export const CacheObservatory: React.FC = () => {
         </div>
       </div>
 
-      {/* Interactive Cache Lookup Simulator */}
+      {/* Interactive Cache Lookup Endpoint Tester */}
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-4">
-        <h3 className="text-xs font-semibold uppercase text-slate-700">Test Cache Lookup Endpoint</h3>
+        <div className="flex justify-between items-center">
+          <h3 className="text-xs font-semibold uppercase text-slate-700">Query Cache Key Endpoint</h3>
+          <span className="text-[11px] text-slate-500 font-mono">GET /api/jobs/:jobId</span>
+        </div>
 
         <div className="flex items-center space-x-3">
           <input
@@ -68,17 +75,24 @@ export const CacheObservatory: React.FC = () => {
             value={testJobId}
             onChange={(e) => setTestJobId(e.target.value)}
             className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono text-slate-800 focus:outline-hidden focus:border-teal-500"
-            placeholder="Enter Job ID..."
+            placeholder="e.g. job-123 or job-456"
           />
           <button
             onClick={handleTestQuery}
-            disabled={loading}
-            className="bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-xs font-medium flex items-center space-x-2 shadow-xs transition-all"
+            disabled={loading || !testJobId.trim()}
+            className="bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-xs font-medium flex items-center space-x-2 shadow-xs transition-all cursor-pointer"
           >
             {loading ? <RefreshCcw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5 fill-current" />}
-            <span>Execute GET /api/jobs/{testJobId}</span>
+            <span>Fetch '{testJobId}'</span>
           </button>
         </div>
+
+        {error && (
+          <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-xs font-mono flex items-center space-x-2">
+            <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
 
         {lastQueryResult && (
           <motion.div
@@ -97,7 +111,10 @@ export const CacheObservatory: React.FC = () => {
                 <Database className="h-4 w-4 text-amber-600" />
               )}
               <span>
-                Status: {lastQueryResult.cacheHit ? 'CACHE HIT (Returned from Redis)' : 'CACHE MISS (Fetched from DynamoDB & Cached)'}
+                Key: <strong className="underline">{lastQueryResult.jobId}</strong> &rarr; Status:{' '}
+                {lastQueryResult.cacheHit
+                  ? 'CACHE HIT (Retrieved instantly from Cache)'
+                  : 'CACHE MISS (Fetched from Repository & Cached)'}
               </span>
             </div>
             <span className="font-bold">{lastQueryResult.duration} ms latency</span>
@@ -108,21 +125,21 @@ export const CacheObservatory: React.FC = () => {
       {/* Visual Flow Diagram */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
         <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
-          <span className="text-xs font-semibold text-slate-500 block mb-1">Total Hits</span>
+          <span className="text-xs font-semibold text-slate-500 block mb-1">Total Cache Hits</span>
           <span className="text-2xl font-bold text-teal-600 font-mono">{stats.hits}</span>
-          <p className="text-[11px] text-slate-400 mt-1">Returned directly from Redis in ~2ms</p>
+          <p className="text-[11px] text-slate-400 mt-1">Served directly from memory cache</p>
         </div>
 
         <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
-          <span className="text-xs font-semibold text-slate-500 block mb-1">Total Misses</span>
+          <span className="text-xs font-semibold text-slate-500 block mb-1">Total Cache Misses</span>
           <span className="text-2xl font-bold text-amber-600 font-mono">{stats.misses}</span>
-          <p className="text-[11px] text-slate-400 mt-1">Queried DynamoDB and populated TTL</p>
+          <p className="text-[11px] text-slate-400 mt-1">Queried repository/DynamoDB & cached with TTL</p>
         </div>
 
         <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
           <span className="text-xs font-semibold text-slate-500 block mb-1">Database Reads</span>
           <span className="text-2xl font-bold text-slate-800 font-mono">{stats.databaseReads}</span>
-          <p className="text-[11px] text-slate-400 mt-1">Actual DynamoDB Read Capacity Units used</p>
+          <p className="text-[11px] text-slate-400 mt-1">Total physical database reads executed</p>
         </div>
       </div>
     </div>

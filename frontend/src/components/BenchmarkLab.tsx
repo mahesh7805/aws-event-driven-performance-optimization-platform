@@ -10,35 +10,22 @@ interface BenchmarkLabProps {
 export const BenchmarkLab: React.FC<BenchmarkLabProps> = ({ onBenchmarkComplete }) => {
   const [selectedJobCount, setSelectedJobCount] = useState<number>(20);
   const [running, setRunning] = useState<boolean>(false);
-  const [progressStep, setProgressStep] = useState<string>('');
   const [result, setResult] = useState<BenchmarkResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleRunBenchmark = async () => {
     setRunning(true);
     setError(null);
-    setProgressStep('Initializing batch workloads...');
 
     try {
-      await new Promise((r) => setTimeout(r, 400));
-      setProgressStep('Executing Serial Baseline loop...');
-      await new Promise((r) => setTimeout(r, 400));
-      setProgressStep('Enqueuing messages to SQS queue...');
-      await new Promise((r) => setTimeout(r, 400));
-      setProgressStep('Fanning out parallel Lambda workers...');
-
-      const res = await runBenchmark(selectedJobCount, 120);
-
-      setProgressStep('Collecting telemetry metrics & cache hits...');
-      await new Promise((r) => setTimeout(r, 300));
-
+      // Execute real benchmark against backend REST API
+      const res = await runBenchmark(selectedJobCount, 40);
       setResult(res);
       if (onBenchmarkComplete) onBenchmarkComplete(res);
     } catch (err: any) {
       setError(err.message || 'Benchmark execution failed');
     } finally {
       setRunning(false);
-      setProgressStep('');
     }
   };
 
@@ -48,10 +35,10 @@ export const BenchmarkLab: React.FC<BenchmarkLabProps> = ({ onBenchmarkComplete 
         <div>
           <h2 className="text-lg font-semibold text-slate-900 flex items-center space-x-2">
             <Zap className="h-5 w-5 text-sky-600" />
-            <span>Interactive Benchmark Laboratory</span>
+            <span>Performance Benchmarking Laboratory</span>
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Compare live measured performance across Serial execution vs SQS + Lambda Parallel processing vs Redis Caching.
+            Real-time measured performance: Local Sequential Baseline vs AWS SQS + Lambda Fan-out vs Memory/Redis Cache.
           </p>
         </div>
 
@@ -77,15 +64,15 @@ export const BenchmarkLab: React.FC<BenchmarkLabProps> = ({ onBenchmarkComplete 
           <button
             onClick={handleRunBenchmark}
             disabled={running}
-            className="flex items-center space-x-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-xs font-medium shadow-sm transition-all"
+            className="flex items-center space-x-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-xs font-medium shadow-sm transition-all cursor-pointer"
           >
             {running ? <span className="animate-spin text-sm">⏳</span> : <Play className="h-3.5 w-3.5 fill-current" />}
-            <span>{running ? 'Running...' : 'Run Benchmark'}</span>
+            <span>{running ? 'Benchmarking...' : `Benchmark ${selectedJobCount} Jobs`}</span>
           </button>
         </div>
       </div>
 
-      {/* Progress Animation */}
+      {/* Progress Indicator */}
       <AnimatePresence>
         {running && (
           <motion.div
@@ -99,9 +86,9 @@ export const BenchmarkLab: React.FC<BenchmarkLabProps> = ({ onBenchmarkComplete 
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-sky-500"></span>
               </span>
-              <span className="font-mono">{progressStep}</span>
+              <span className="font-mono">Executing Serial Baseline vs Parallel SQS/Lambda Workload ({selectedJobCount} Jobs)...</span>
             </div>
-            <span className="text-slate-400 font-mono text-[11px]">Executing on Backend REST API</span>
+            <span className="text-slate-400 font-mono text-[11px]">Backend API Benchmark Engine</span>
           </motion.div>
         )}
       </AnimatePresence>
@@ -189,7 +176,7 @@ export const BenchmarkLab: React.FC<BenchmarkLabProps> = ({ onBenchmarkComplete 
                   <td className="p-3 font-semibold text-slate-900">Database Reads Required</td>
                   <td className="p-3">{result.jobCount} reads</td>
                   <td className="p-3">{result.jobCount} reads</td>
-                  <td className="p-3 text-emerald-700 font-semibold">0 reads (Cache Hit)</td>
+                  <td className="p-3 text-emerald-700 font-semibold">{result.databaseReadsSaved} reads saved</td>
                 </tr>
               </tbody>
             </table>

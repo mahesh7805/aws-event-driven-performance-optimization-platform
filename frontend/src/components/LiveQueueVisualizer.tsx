@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Cpu, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
-import { runParallelBatch } from '../services/apiClient';
+import { runParallelBatch, getBatchDetails } from '../services/apiClient';
 
 interface QueueJobItem {
   id: string;
@@ -11,40 +11,56 @@ interface QueueJobItem {
 }
 
 export const LiveQueueVisualizer: React.FC = () => {
+  const [selectedJobCount, setSelectedJobCount] = useState<number>(20);
   const [jobs, setJobs] = useState<QueueJobItem[]>([]);
   const [running, setRunning] = useState<boolean>(false);
+  const [batchId, setBatchId] = useState<string | null>(null);
 
   const startLiveSimulation = async () => {
     setRunning(true);
-    const total = 8;
-    const initialJobs: QueueJobItem[] = Array.from({ length: total }, (_, i) => ({
-      id: `job-sqs-${i + 1}`,
-      status: 'QUEUED',
-    }));
-    setJobs(initialJobs);
+    setJobs([]);
 
-    // Trigger backend parallel execution
-    runParallelBatch(total, 120).catch(console.error);
+    try {
+      // 1. Trigger backend Parallel Execution for selected job count
+      const res = await runParallelBatch(selectedJobCount, 40);
+      setBatchId(res.batch.batchId);
 
-    // Animate stage transitions
-    for (let i = 0; i < total; i++) {
-      await new Promise((r) => setTimeout(r, 200));
-      setJobs((prev) =>
-        prev.map((item, idx) =>
-          idx === i ? { ...item, status: 'PROCESSING', workerId: `Lambda Worker ${(i % 4) + 1}` } : item
-        )
-      );
+      // Set initial queued items
+      const initialJobs: QueueJobItem[] = res.jobs.map((j, i) => ({
+        id: j.jobId,
+        status: j.status as any,
+        workerId: `Lambda Worker ${(i % 10) + 1}`,
+        duration: j.duration,
+      }));
+      setJobs(initialJobs);
 
-      setTimeout(() => {
-        setJobs((prev) =>
-          prev.map((item, idx) =>
-            idx === i ? { ...item, status: 'COMPLETED', duration: 120 + Math.floor(Math.random() * 30) } : item
-          )
-        );
-      }, 500);
+      // Poll batch state until completion
+      const pollInterval = setInterval(async () => {
+        try {
+          const updated = await getBatchDetails(res.batch.batchId);
+          if (updated && updated.jobs) {
+            setJobs(
+              updated.jobs.map((j, i) => ({
+                id: j.jobId,
+                status: j.status as any,
+                workerId: `Lambda Worker ${(i % 10) + 1}`,
+                duration: j.duration,
+              }))
+            );
+            if (updated.batch.completedJobs + updated.batch.failedJobs >= updated.batch.totalJobs) {
+              clearInterval(pollInterval);
+              setRunning(false);
+            }
+          }
+        } catch {
+          clearInterval(pollInterval);
+          setRunning(false);
+        }
+      }, 150);
+    } catch (err) {
+      console.error('Parallel batch execution failed', err);
+      setRunning(false);
     }
-
-    setTimeout(() => setRunning(false), 800);
   };
 
   const queued = jobs.filter((j) => j.status === 'QUEUED');
@@ -54,26 +70,53 @@ export const LiveQueueVisualizer: React.FC = () => {
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs space-y-6">
-      <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
         <div>
           <h2 className="text-lg font-semibold text-slate-900 flex items-center space-x-2">
             <Cpu className="h-5 w-5 text-indigo-600" />
             <span>Live SQS & Worker Queue Visualizer</span>
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Real-time stage transitions: SQS Message Queue → Lambda Worker Pool → DynamoDB Persistence.
+            Real-time stage transitions: SQS Message Queue &rarr; Lambda Worker Pool &rarr; DynamoDB Persistence.
           </p>
         </div>
 
-        <button
-          onClick={startLiveSimulation}
-          disabled={running}
-          className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-xs font-medium shadow-sm transition-all"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${running ? 'animate-spin' : ''}`} />
-          <span>{running ? 'Simulating Batch...' : 'Simulate Queue Flow'}</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          {/* Job Count Selector */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-lg">
+            {[10, 20, 50, 100].map((count) => (
+              <button
+                key={count}
+                disabled={running}
+                onClick={() => setSelectedJobCount(count)}
+                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                  selectedJobCount === count
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {count} Jobs
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={startLiveSimulation}
+            disabled={running}
+            className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-xs font-medium shadow-sm transition-all cursor-pointer"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${running ? 'animate-spin' : ''}`} />
+            <span>{running ? 'Processing...' : `Submit ${selectedJobCount} Jobs`}</span>
+          </button>
+        </div>
       </div>
+
+      {batchId && (
+        <div className="text-[11px] font-mono text-slate-500 bg-slate-50 p-2 rounded-md flex justify-between">
+          <span>Batch ID: <strong className="text-slate-800">{batchId}</strong></span>
+          <span>Total: <strong>{jobs.length}</strong> | Queued: <strong className="text-slate-600">{queued.length}</strong> | Active: <strong className="text-sky-600">{processing.length}</strong> | Completed: <strong className="text-emerald-600">{completed.length}</strong> | Failed: <strong className="text-red-600">{failed.length}</strong></span>
+        </div>
+      )}
 
       {/* 4 Pipeline Columns */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -86,9 +129,9 @@ export const LiveQueueVisualizer: React.FC = () => {
             </span>
           </div>
 
-          <div className="space-y-2 min-h-[160px]">
+          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
             <AnimatePresence>
-              {queued.map((job) => (
+              {queued.slice(0, 15).map((job) => (
                 <motion.div
                   key={job.id}
                   layout
@@ -97,11 +140,14 @@ export const LiveQueueVisualizer: React.FC = () => {
                   exit={{ opacity: 0, scale: 0.9 }}
                   className="bg-white border border-slate-200 p-2.5 rounded-lg text-xs font-mono shadow-xs flex items-center justify-between text-slate-700"
                 >
-                  <span>{job.id}</span>
-                  <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">Enqueued</span>
+                  <span className="truncate max-w-[120px]">{job.id}</span>
+                  <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded shrink-0">Enqueued</span>
                 </motion.div>
               ))}
             </AnimatePresence>
+            {queued.length > 15 && (
+              <div className="text-[10px] text-slate-400 text-center font-mono">+ {queued.length - 15} more in SQS queue</div>
+            )}
             {queued.length === 0 && (
               <p className="text-xs text-slate-400 text-center py-10 italic">Queue empty</p>
             )}
@@ -117,9 +163,9 @@ export const LiveQueueVisualizer: React.FC = () => {
             </span>
           </div>
 
-          <div className="space-y-2 min-h-[160px]">
+          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
             <AnimatePresence>
-              {processing.map((job) => (
+              {processing.slice(0, 15).map((job) => (
                 <motion.div
                   key={job.id}
                   layout
@@ -129,13 +175,16 @@ export const LiveQueueVisualizer: React.FC = () => {
                   className="bg-white border border-sky-300 p-2.5 rounded-lg text-xs font-mono shadow-xs space-y-1"
                 >
                   <div className="flex justify-between items-center text-sky-900 font-semibold">
-                    <span>{job.id}</span>
+                    <span className="truncate max-w-[120px]">{job.id}</span>
                     <span className="inline-flex h-2 w-2 rounded-full bg-sky-500 animate-ping"></span>
                   </div>
                   <div className="text-[10px] text-sky-600 font-sans">{job.workerId}</div>
                 </motion.div>
               ))}
             </AnimatePresence>
+            {processing.length > 15 && (
+              <div className="text-[10px] text-sky-500 text-center font-mono">+ {processing.length - 15} active workers</div>
+            )}
             {processing.length === 0 && (
               <p className="text-xs text-sky-400 text-center py-10 italic">No active workers</p>
             )}
@@ -151,9 +200,9 @@ export const LiveQueueVisualizer: React.FC = () => {
             </span>
           </div>
 
-          <div className="space-y-2 min-h-[160px]">
+          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
             <AnimatePresence>
-              {completed.map((job) => (
+              {completed.slice(0, 15).map((job) => (
                 <motion.div
                   key={job.id}
                   layout
@@ -161,14 +210,17 @@ export const LiveQueueVisualizer: React.FC = () => {
                   animate={{ opacity: 1, scale: 1 }}
                   className="bg-white border border-emerald-200 p-2.5 rounded-lg text-xs font-mono shadow-xs flex justify-between items-center text-emerald-900"
                 >
-                  <div className="flex items-center space-x-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                    <span>{job.id}</span>
+                  <div className="flex items-center space-x-1.5 min-w-0">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                    <span className="truncate max-w-[100px]">{job.id}</span>
                   </div>
-                  <span className="text-[10px] text-slate-400 font-sans">{job.duration}ms</span>
+                  <span className="text-[10px] text-slate-400 font-sans shrink-0">{job.duration}ms</span>
                 </motion.div>
               ))}
             </AnimatePresence>
+            {completed.length > 15 && (
+              <div className="text-[10px] text-emerald-600 text-center font-mono">+ {completed.length - 15} completed jobs</div>
+            )}
             {completed.length === 0 && (
               <p className="text-xs text-emerald-400 text-center py-10 italic">No completed jobs yet</p>
             )}
@@ -184,7 +236,7 @@ export const LiveQueueVisualizer: React.FC = () => {
             </span>
           </div>
 
-          <div className="space-y-2 min-h-[160px]">
+          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
             {failed.map((job) => (
               <div key={job.id} className="bg-white border border-red-200 p-2.5 rounded-lg text-xs font-mono shadow-xs text-red-800">
                 <AlertCircle className="h-3.5 w-3.5 text-red-600 inline mr-1" />

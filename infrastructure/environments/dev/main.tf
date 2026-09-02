@@ -131,25 +131,25 @@ resource "aws_lambda_function" "producer" {
 
   environment {
     variables = {
-      SQS_QUEUE_URL  = module.sqs.queue_url
+      SQS_QUEUE_URL                       = module.sqs.queue_url
       AWS_NODEJS_CONNECTION_REUSE_ENABLED = "1"
     }
   }
 }
 
 resource "aws_lambda_function" "worker" {
-  function_name    = "${var.project_name}-worker-${var.environment}"
-  role             = aws_iam_role.lambda_exec.arn
-  handler          = "worker.handler"
-  runtime          = "nodejs20.x"
-  filename         = data.archive_file.dummy_lambda_zip.output_path
-  source_code_hash = data.archive_file.dummy_lambda_zip.output_base64sha256
-  timeout          = 30
+  function_name                  = "${var.project_name}-worker-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  handler                        = "worker.handler"
+  runtime                        = "nodejs20.x"
+  filename                       = data.archive_file.dummy_lambda_zip.output_path
+  source_code_hash               = data.archive_file.dummy_lambda_zip.output_base64sha256
+  timeout                        = 30
   reserved_concurrent_executions = 50
 
   environment {
     variables = {
-      DYNAMODB_JOBS_TABLE = module.dynamodb.jobs_table_name
+      DYNAMODB_JOBS_TABLE                 = module.dynamodb.jobs_table_name
       AWS_NODEJS_CONNECTION_REUSE_ENABLED = "1"
     }
   }
@@ -178,9 +178,9 @@ resource "aws_apigatewayv2_api" "http_api" {
 }
 
 resource "aws_apigatewayv2_integration" "producer_integration" {
-  api_id           = aws_apigatewayv2_api.http_api.id
-  integration_type = "AWS_PROXY"
-  integration_uri  = aws_lambda_function.producer.invoke_arn
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.producer.invoke_arn
   payload_format_version = "2.0"
 }
 
