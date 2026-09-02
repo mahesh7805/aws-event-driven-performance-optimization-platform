@@ -14,7 +14,7 @@ describe('Layer 6 & 7 - REST API & Benchmark Integration Tests', () => {
     });
   });
 
-  afterAll((done) => {
+  afterAll(() => {
     if (server) server.close();
   });
 
