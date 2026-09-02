@@ -8,30 +8,32 @@ const ddbClient = new DynamoDBClient({
 });
 const docClient = DynamoDBDocumentClient.from(ddbClient);
 
+// In-memory cache for warm container executions
 const processedKeys = new Set<string>();
 
 /**
  * Parallel SQS Worker Lambda Handler
- * Processes individual job messages from SQS with idempotency and updates DynamoDB.
+ * Processes job messages from SQS concurrently within a batch, enforcing DynamoDB idempotency.
  */
 export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
   const batchItemFailures: { itemIdentifier: string }[] = [];
 
-  for (const record of event.Records) {
+  // Process all records in the SQS event batch concurrently using Promise.all
+  const processPromises = event.Records.map(async (record) => {
     try {
       const message = JSON.parse(record.body);
       const { jobId, batchId, jobIndex, processingMs } = message;
 
-      // Idempotency check
+      // Primary Warm Container Idempotency check
       if (processedKeys.has(jobId)) {
-        console.log(`[Lambda Worker Idempotency] Skipping duplicate message ${jobId}`);
-        continue;
+        console.log(`[Lambda Worker Idempotency] Warm container skipping duplicate message ${jobId}`);
+        return;
       }
 
       console.log(`[Lambda Worker] Processing Job ${jobId} (Index ${jobIndex})`);
 
       const startTime = Date.now();
-      // Simulate deterministic workload calculation
+      // CPU-bound computation simulation
       let sum = 0;
       for (let i = 1; i <= 10000; i++) {
         sum += Math.sqrt(i * (jobIndex || 1));
@@ -41,34 +43,45 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
       await new Promise((resolve) => setTimeout(resolve, targetMs));
 
       const duration = Date.now() - startTime;
-
       processedKeys.add(jobId);
 
       const tableName = process.env.DYNAMODB_JOBS_TABLE || 'JobsTable';
 
       if (process.env.AWS_ENDPOINT || process.env.DYNAMODB_JOBS_TABLE) {
-        await docClient.send(
-          new PutCommand({
-            TableName: tableName,
-            Item: {
-              jobId,
-              batchId,
-              status: 'COMPLETED',
-              completedAt: new Date().toISOString(),
-              duration,
-              result: {
-                computedChecksum: Math.round(sum * 100) / 100,
-                simulatedDurationMs: duration,
+        try {
+          await docClient.send(
+            new PutCommand({
+              TableName: tableName,
+              Item: {
+                jobId,
+                batchId,
+                status: 'COMPLETED',
+                completedAt: new Date().toISOString(),
+                duration,
+                result: {
+                  computedChecksum: Math.round(sum * 100) / 100,
+                  simulatedDurationMs: duration,
+                },
               },
-            },
-          })
-        );
+              // Enforce table-level idempotency to prevent duplicate processing overwrites
+              ConditionExpression: 'attribute_not_exists(jobId)',
+            })
+          );
+        } catch (err: any) {
+          if (err.name === 'ConditionalCheckFailedException') {
+            console.log(`[Lambda Worker Idempotency] DynamoDB skipped duplicate write for ${jobId}`);
+          } else {
+            throw err;
+          }
+        }
       }
     } catch (err) {
       console.error(`[Lambda Worker Error] Failed processing record ${record.messageId}:`, err);
       batchItemFailures.push({ itemIdentifier: record.messageId });
     }
-  }
+  });
+
+  await Promise.all(processPromises);
 
   return { batchItemFailures };
 };

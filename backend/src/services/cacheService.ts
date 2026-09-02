@@ -7,7 +7,8 @@ interface CacheEntry {
 }
 
 /**
- * In-Memory TTL Cache Layer with Hit/Miss Telemetry & Redis Protocol compatibility interface.
+ * Dual-Mode Cache Layer (In-Memory TTL & Redis Protocol Compatible Interface)
+ * Handles automatic fallback, TTL expiration, and hit/miss performance telemetry.
  */
 export class CacheService {
   private cache = new Map<string, CacheEntry>();
@@ -30,7 +31,7 @@ export class CacheService {
 
     // CACHE MISS
     if (cached) {
-      this.cache.delete(key); // Remove expired entry
+      this.cache.delete(key); // Evict expired key
     }
 
     this.repo.recordCacheMiss();
@@ -39,10 +40,7 @@ export class CacheService {
     const dbJob = await this.repo.getJob(jobId);
     if (dbJob) {
       // Store in Cache with TTL
-      this.cache.set(key, {
-        data: { ...dbJob },
-        expiresAt: now + this.defaultTtlMs,
-      });
+      this.setJob(dbJob);
     }
 
     return { job: dbJob, hit: false };
@@ -50,7 +48,7 @@ export class CacheService {
 
   public setJob(job: Job, ttlSeconds?: number): void {
     const key = `job:${job.jobId}`;
-    const ttl = (ttlSeconds ?? this.defaultTtlMs / 1000) * 1000;
+    const ttl = (ttlSeconds ?? (this.defaultTtlMs / 1000)) * 1000;
     this.cache.set(key, {
       data: { ...job },
       expiresAt: Date.now() + ttl,
