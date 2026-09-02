@@ -1,0 +1,28 @@
+{
+  "name": "aws-event-driven-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AWS Event-Driven Performance Optimization Platform",
+  "workspaces": [
+    "frontend",
+    "backend",
+    "lambdas",
+    "tests"
+  ],
+  "scripts": {
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:backend": "npm run dev --workspace=backend",
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
+    "test": "npm run test --workspace=tests"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.10.0",
+    "eslint": "^9.10.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.5.0"
+  }
+}

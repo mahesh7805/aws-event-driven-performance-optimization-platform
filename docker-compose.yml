@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # LocalStack for simulating AWS services (SQS, DynamoDB, S3, Lambda) locally
+  localstack:
+    image: localstack/localstack:latest
+    container_name: aws_platform_localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=sqs,dynamodb,s3,lambda,iam,cloudwatch
+      - DEFAULT_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - "./infrastructure/localstack:/etc/localstack/init/ready.d"
+
+  # Redis service for caching layer
+  redis:
+    image: redis:7-alpine
+    container_name: aws_platform_redis
+    ports:
+      - "6379:6379"
+
+  # Backend REST API server
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aws_platform_backend
+    ports:
+      - "4000:4000"
+    environment:
+      - PORT=4000
+      - NODE_ENV=development
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AWS_REGION=us-east-1
+      - AWS_ENDPOINT=http://localstack:4566
+    depends_on:
+      - redis
+      - localstack
+
+  # Frontend Dashboard
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: aws_platform_frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
