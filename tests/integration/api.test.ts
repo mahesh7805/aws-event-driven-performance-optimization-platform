@@ -132,4 +132,41 @@ describe('Layer 6 & 7 - REST API & Benchmark Integration Tests', () => {
     expect(data.command).toBe('terraform validate -no-color');
     expect(data.exitCode).toBe(0);
   });
+
+  it('POST /api/batches should create batch and GET /api/metrics/system and /api/logs should return valid operational data', async () => {
+    // 1. Create batch via canonical endpoint
+    const createRes = await fetch(`${BASE_URL}/batches`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'SERIAL', jobCount: 2, simulationDelayMs: 10 }),
+    });
+    expect(createRes.status).toBe(201);
+    const createData = await createRes.json();
+    expect(createData.batch.batchId).toBeDefined();
+
+    // 2. Query paginated jobs
+    const jobsRes = await fetch(`${BASE_URL}/batches/${createData.batch.batchId}/jobs?page=1&limit=10`);
+    expect(jobsRes.status).toBe(200);
+    const jobsData = await jobsRes.json();
+    expect(jobsData.jobs).toBeDefined();
+    expect(jobsData.total).toBe(2);
+
+    // 3. Query system metrics
+    const metricsRes = await fetch(`${BASE_URL}/metrics/system`);
+    expect(metricsRes.status).toBe(200);
+    const metricsData = await metricsRes.json();
+    expect(metricsData.sqs).toBeDefined();
+    expect(metricsData.lambda).toBeDefined();
+    expect(metricsData.lambda.configuredConcurrencyLimit).toBe(10);
+    expect(metricsData.application).toBeDefined();
+
+    // 4. Query logs
+    const logsRes = await fetch(`${BASE_URL}/logs`);
+    expect(logsRes.status).toBe(200);
+    const logsData = await logsRes.json();
+    expect(logsData.logs).toBeDefined();
+    expect(Array.isArray(logsData.logs)).toBe(true);
+    expect(logsData.count).toBeGreaterThan(0);
+  });
 });
+

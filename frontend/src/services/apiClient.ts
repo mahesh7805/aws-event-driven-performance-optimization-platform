@@ -5,9 +5,13 @@ export interface BatchResponse {
     totalJobs: number;
     completedJobs: number;
     failedJobs: number;
+    queuedJobs?: number;
     startedAt: string;
     completedAt?: string;
     totalDuration?: number;
+    averageJobDuration?: number;
+    throughput?: number;
+    peakConcurrency?: number;
   };
   jobs: Array<{
     jobId: string;
@@ -17,9 +21,14 @@ export interface BatchResponse {
     startedAt?: string;
     completedAt?: string;
     duration?: number;
+    processingTime?: number;
+    mode?: 'SERIAL' | 'PARALLEL' | 'PARALLEL_CACHED';
+    workerId?: string;
+    requestId?: string;
     result?: any;
     error?: string;
   }>;
+  concurrencyTimeline?: Array<{ timeMs: number; concurrency: number }>;
 }
 
 export interface BenchmarkResponse {
@@ -35,6 +44,9 @@ export interface BenchmarkResponse {
   parallelBatchId: string;
   benchmarkId: string;
   timestamp: string;
+  serialPeakConcurrency?: number;
+  parallelPeakConcurrency?: number;
+  speedupMultiplier?: number;
 }
 
 export interface CacheStatsResponse {
@@ -64,42 +76,19 @@ export interface FailureSimulationResponse {
   timestamp: string;
 }
 
-export async function runSerialBatch(jobCount: number, jobProcessingMs: number = 150): Promise<BatchResponse> {
-  const res = await fetch('/api/batches/serial', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jobCount, jobProcessingMs }),
-  });
-  if (!res.ok) throw new Error(`Serial execution failed with status ${res.status}`);
-  return res.json();
-}
-
-export async function runParallelBatch(jobCount: number, jobProcessingMs: number = 150): Promise<BatchResponse> {
-  const res = await fetch('/api/batches/parallel', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jobCount, jobProcessingMs }),
-  });
-  if (!res.ok) throw new Error(`Parallel execution failed with status ${res.status}`);
-  return res.json();
-}
-
-export async function getBatchDetails(batchId: string): Promise<BatchResponse> {
-  const res = await fetch(`/api/batches/${batchId}`);
-  if (!res.ok) throw new Error(`Failed to fetch batch ${batchId}`);
-  return res.json();
-}
-
 export interface BatchRecord {
   batchId: string;
   mode: 'SERIAL' | 'PARALLEL' | 'PARALLEL_CACHED';
   totalJobs: number;
   completedJobs: number;
   failedJobs: number;
+  queuedJobs?: number;
   startedAt: string;
   completedAt?: string;
   totalDuration?: number;
   durationMs?: number;
+  throughput?: number;
+  peakConcurrency?: number;
   status?: 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | string;
 }
 
@@ -110,17 +99,140 @@ export interface BatchesListResponse {
   batchesTableName?: string | null;
 }
 
+export interface SystemMetricsResponse {
+  timestamp: string;
+  sqs: {
+    queueUrl: string | null;
+    approximateNumberOfMessages: number;
+    approximateNumberOfMessagesNotVisible: number;
+    approximateNumberOfMessagesDelayed: number;
+    messagesReceived24h?: number;
+    messagesDeleted24h?: number;
+    oldestMessageAgeSeconds?: number;
+  };
+  lambda: {
+    functionName: string;
+    configuredConcurrencyLimit: number;
+    currentConcurrency: number;
+    peakConcurrency: number;
+    invocations?: number;
+    errors?: number;
+    throttles?: number;
+    avgDurationMs?: number;
+  };
+  application: {
+    totalBatches: number;
+    totalJobsCompleted: number;
+    totalJobsFailed: number;
+    averageJobDurationMs: number;
+    latestBatchThroughput: number;
+  };
+}
+
+export interface EventLogItem {
+  id: string;
+  timestamp: string;
+  timeFormatted: string;
+  category: 'BATCH' | 'SQS' | 'LAMBDA' | 'DYNAMODB' | 'SYSTEM';
+  level: 'INFO' | 'WARN' | 'ERROR' | 'SUCCESS';
+  message: string;
+  batchId?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface LogsResponse {
+  logs: EventLogItem[];
+  count: number;
+}
+
+export interface PaginatedJobsResponse {
+  jobs: Array<{
+    jobId: string;
+    batchId: string;
+    status: 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+    createdAt: string;
+    startedAt?: string;
+    completedAt?: string;
+    duration?: number;
+    processingTime?: number;
+    mode?: string;
+    workerId?: string;
+    requestId?: string;
+    error?: string;
+    result?: any;
+  }>;
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+// ==========================================
+// Batch Operations
+// ==========================================
+
+export async function createBatch(params: {
+  mode: 'SERIAL' | 'PARALLEL';
+  jobCount: number;
+  simulationDelayMs?: number;
+}): Promise<BatchResponse> {
+  const res = await fetch('/api/batches', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error(`Batch creation failed with status ${res.status}`);
+  return res.json();
+}
+
+export async function runSerialBatch(jobCount: number, simulationDelayMs: number = 0): Promise<BatchResponse> {
+  return createBatch({ mode: 'SERIAL', jobCount, simulationDelayMs });
+}
+
+export async function runParallelBatch(jobCount: number, simulationDelayMs: number = 0): Promise<BatchResponse> {
+  return createBatch({ mode: 'PARALLEL', jobCount, simulationDelayMs });
+}
+
+export async function getBatchDetails(batchId: string): Promise<BatchResponse> {
+  const res = await fetch(`/api/batches/${batchId}`);
+  if (!res.ok) throw new Error(`Failed to fetch batch ${batchId}`);
+  return res.json();
+}
+
+export async function getPaginatedJobs(batchId: string, page = 1, limit = 50): Promise<PaginatedJobsResponse> {
+  const res = await fetch(`/api/batches/${batchId}/jobs?page=${page}&limit=${limit}`);
+  if (!res.ok) throw new Error(`Failed to fetch jobs for batch ${batchId}`);
+  return res.json();
+}
+
 export async function getAllBatches(): Promise<BatchesListResponse> {
   const res = await fetch('/api/batches');
   if (!res.ok) throw new Error(`Failed to fetch batches (${res.status})`);
   return res.json();
 }
 
-export async function runBenchmark(jobCount: number, jobProcessingMs: number = 150): Promise<BenchmarkResponse> {
+// ==========================================
+// Metrics & Observability Operations
+// ==========================================
+
+export async function getSystemMetrics(): Promise<SystemMetricsResponse> {
+  const res = await fetch('/api/metrics/system');
+  if (!res.ok) throw new Error(`Failed to fetch system metrics (${res.status})`);
+  return res.json();
+}
+
+export async function getExecutionLogs(batchId?: string, limit = 100): Promise<LogsResponse> {
+  const url = batchId ? `/api/logs?batchId=${batchId}&limit=${limit}` : `/api/logs?limit=${limit}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch logs (${res.status})`);
+  return res.json();
+}
+
+export async function runBenchmark(jobCount: number, simulationDelayMs: number = 0): Promise<BenchmarkResponse> {
   const res = await fetch('/api/benchmarks', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jobCount, jobProcessingMs }),
+    body: JSON.stringify({ jobCount, simulationDelayMs, jobProcessingMs: simulationDelayMs }),
   });
   if (!res.ok) throw new Error(`Benchmark execution failed with status ${res.status}`);
   return res.json();
@@ -147,6 +259,10 @@ export async function simulateFailure(scenario: string): Promise<FailureSimulati
   if (!res.ok) throw new Error(`Failure simulation failed (${res.status})`);
   return res.json();
 }
+
+// ==========================================
+// Terraform Operations (Untouched)
+// ==========================================
 
 export interface TerraformPlanDetails {
   add: number;

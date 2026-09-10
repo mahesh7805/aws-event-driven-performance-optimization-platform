@@ -129,4 +129,43 @@ describe('Layer 1 - Data Model & Repository CRUD Tests', () => {
     expect(updated?.status).toBe('COMPLETED');
     expect(updated?.duration).toBe(50);
   });
+
+  it('should accurately calculate peak concurrency and concurrency timeline from overlapping job timestamps', () => {
+    const baseTime = 1700000000000;
+    const jobs: Job[] = [
+      {
+        jobId: 'j1',
+        batchId: 'b1',
+        status: 'COMPLETED',
+        createdAt: new Date(baseTime).toISOString(),
+        startedAt: new Date(baseTime).toISOString(),
+        completedAt: new Date(baseTime + 100).toISOString(),
+        duration: 100,
+      },
+      {
+        jobId: 'j2',
+        batchId: 'b1',
+        status: 'COMPLETED',
+        createdAt: new Date(baseTime).toISOString(),
+        startedAt: new Date(baseTime + 20).toISOString(),
+        completedAt: new Date(baseTime + 80).toISOString(),
+        duration: 60,
+      },
+      {
+        jobId: 'j3',
+        batchId: 'b1',
+        status: 'COMPLETED',
+        createdAt: new Date(baseTime).toISOString(),
+        startedAt: new Date(baseTime + 50).toISOString(),
+        completedAt: new Date(baseTime + 150).toISOString(),
+        duration: 100,
+      },
+    ];
+
+    const result = repo.calculateBatchConcurrency(jobs);
+    // At t=baseTime + 50 to baseTime + 80, all 3 jobs are active simultaneously!
+    expect(result.peakConcurrency).toBe(3);
+    expect(result.concurrencyTimeline.length).toBeGreaterThan(0);
+  });
 });
+

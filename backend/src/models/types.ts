@@ -8,7 +8,11 @@ export interface Job {
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
+  processingTime?: number;
   duration?: number;
+  mode?: ProcessingMode;
+  workerId?: string;
+  requestId?: string;
   result?: Record<string, any> | string | number;
   error?: string;
 }
@@ -16,12 +20,18 @@ export interface Job {
 export interface Batch {
   batchId: string;
   mode: ProcessingMode;
+  status?: JobStatus;
   totalJobs: number;
   completedJobs: number;
   failedJobs: number;
+  queuedJobs?: number;
   startedAt: string;
   completedAt?: string;
   totalDuration?: number;
+  durationMs?: number;
+  averageJobDuration?: number;
+  throughput?: number;
+  peakConcurrency?: number;
 }
 
 export interface Benchmark {
@@ -41,4 +51,34 @@ export interface CacheStats {
   misses: number;
   hitRate: number;
   databaseReads: number;
+}
+
+export interface SystemMetrics {
+  timestamp: string;
+  sqs: {
+    queueUrl: string | null;
+    approximateNumberOfMessages: number;
+    approximateNumberOfMessagesNotVisible: number;
+    approximateNumberOfMessagesDelayed: number;
+    messagesReceived24h?: number;
+    messagesDeleted24h?: number;
+    oldestMessageAgeSeconds?: number;
+  };
+  lambda: {
+    functionName: string;
+    configuredConcurrencyLimit: number;
+    currentConcurrency: number;
+    peakConcurrency: number;
+    invocations?: number;
+    errors?: number;
+    throttles?: number;
+    avgDurationMs?: number;
+  };
+  application: {
+    totalBatches: number;
+    totalJobsCompleted: number;
+    totalJobsFailed: number;
+    averageJobDurationMs: number;
+    latestBatchThroughput: number;
+  };
 }

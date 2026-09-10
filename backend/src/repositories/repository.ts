@@ -170,18 +170,53 @@ export class DataRepository {
     return updated;
   }
 
-  public async getJobsByBatch(batchId: string): Promise<Job[]> {
-    this.stats.databaseReads++;
-    const memoryJobs: Job[] = [];
-    for (const job of this.jobs.values()) {
-      if (job.batchId === batchId) {
-        memoryJobs.push({ ...job });
-      }
-    }
-    if (memoryJobs.length > 0) {
-      return memoryJobs;
+  public calculateBatchConcurrency(jobs: Job[]): { peakConcurrency: number; concurrencyTimeline: { timeMs: number; concurrency: number }[] } {
+    const activeJobs = jobs.filter((j) => j.startedAt && j.completedAt);
+    if (activeJobs.length === 0) {
+      return { peakConcurrency: jobs.some((j) => j.status === 'PROCESSING') ? 1 : 0, concurrencyTimeline: [] };
     }
 
+    interface TimeEvent {
+      time: number;
+      delta: number;
+    }
+
+    const events: TimeEvent[] = [];
+    for (const job of activeJobs) {
+      const start = new Date(job.startedAt!).getTime();
+      const end = new Date(job.completedAt!).getTime();
+      events.push({ time: start, delta: 1 });
+      events.push({ time: end, delta: -1 });
+    }
+
+    events.sort((a, b) => a.time - b.time || b.delta - a.delta);
+
+    let current = 0;
+    let peak = 0;
+    const timeline: { timeMs: number; concurrency: number }[] = [];
+
+    for (const evt of events) {
+      current += evt.delta;
+      if (current < 0) current = 0;
+      if (current > peak) peak = current;
+      timeline.push({ timeMs: evt.time, concurrency: current });
+    }
+
+    return { peakConcurrency: peak, concurrencyTimeline: timeline };
+  }
+
+  public async getJobsByBatch(batchId: string): Promise<Job[]> {
+    this.stats.databaseReads++;
+    const jobsMap = new Map<string, Job>();
+
+    // 1. Gather any existing in-memory jobs for this batch
+    for (const job of this.jobs.values()) {
+      if (job.batchId === batchId) {
+        jobsMap.set(job.jobId, { ...job });
+      }
+    }
+
+    // 2. Query DynamoDB BatchIndex if available to get updates from Lambda
     const tableName = this.getJobsTableName();
     if (tableName) {
       try {
@@ -197,18 +232,49 @@ export class DataRepository {
           })
         );
         if (queryRes.Items && queryRes.Items.length > 0) {
-          const cloudJobs = queryRes.Items as Job[];
-          for (const cj of cloudJobs) {
-            this.jobs.set(cj.jobId, cj);
+          for (const item of queryRes.Items) {
+            const cloudJob = item as Job;
+            jobsMap.set(cloudJob.jobId, cloudJob);
+            this.jobs.set(cloudJob.jobId, cloudJob);
           }
-          return cloudJobs;
         }
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.warn(`[DynamoDB Warning] Failed to query jobs for batch ${batchId} from ${tableName}: ${errMsg}`);
       }
     }
-    return [];
+
+    const result = Array.from(jobsMap.values());
+    if (result.length > 0) {
+      const completed = result.filter((j) => j.status === 'COMPLETED').length;
+      const failed = result.filter((j) => j.status === 'FAILED').length;
+      const queued = result.filter((j) => j.status === 'QUEUED').length;
+      const existingBatch = this.batches.get(batchId);
+      if (existingBatch) {
+        const totalDuration = existingBatch.startedAt && (completed + failed >= existingBatch.totalJobs)
+          ? (existingBatch.totalDuration || Date.now() - new Date(existingBatch.startedAt).getTime())
+          : existingBatch.totalDuration;
+        const totalJobDurationSum = result.filter((j) => j.duration).reduce((acc, curr) => acc + (curr.duration || 0), 0);
+        const averageJobDuration = completed > 0 ? Math.round(totalJobDurationSum / completed) : undefined;
+        const throughput = totalDuration && totalDuration > 0 ? Math.round((completed / (totalDuration / 1000)) * 10) / 10 : undefined;
+        const { peakConcurrency } = this.calculateBatchConcurrency(result);
+
+        const updatedBatch: Batch = {
+          ...existingBatch,
+          completedJobs: completed,
+          failedJobs: failed,
+          queuedJobs: queued,
+          ...(totalDuration ? { totalDuration } : {}),
+          ...(averageJobDuration ? { averageJobDuration } : {}),
+          ...(throughput ? { throughput } : {}),
+          ...(peakConcurrency ? { peakConcurrency } : {}),
+          ...(completed + failed >= existingBatch.totalJobs ? { completedAt: existingBatch.completedAt || new Date().toISOString() } : {}),
+        };
+        this.batches.set(batchId, updatedBatch);
+      }
+    }
+
+    return result;
   }
 
   // --- Batch Operations ---

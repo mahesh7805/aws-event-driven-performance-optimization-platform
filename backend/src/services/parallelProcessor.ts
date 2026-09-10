@@ -4,10 +4,12 @@ import { Job, Batch } from '../models/types.js';
 import { DataRepository } from '../repositories/repository.js';
 import { executeDeterministicWorkload } from './serialProcessor.js';
 import { globalTerraformService } from './terraformService.js';
+import { globalEventLogService } from './eventLogService.js';
 
 export interface ParallelProcessorOptions {
   jobCount: number;
   jobProcessingMs?: number;
+  simulationDelayMs?: number;
   failJobId?: string; // Optional for failure testing
 }
 
@@ -17,6 +19,7 @@ export interface SQSMessagePayload {
   jobIndex: number;
   totalJobs: number;
   processingMs: number;
+  simulationDelayMs: number;
   isPoisonPill?: boolean;
 }
 
@@ -25,7 +28,7 @@ const SQS_MAX_BATCH_SIZE = 10;
 /**
  * Decoupled Event-Driven Parallel SQS Processor.
  * Enqueues messages to SQS in chunks of max 10, returning batch ID immediately in QUEUED state.
- * Workers update job status asynchronously in storage (DynamoDB / Repository).
+ * AWS Lambda consumes via SQS Event Source Mapping and autoscales dynamically up to reserved limit.
  */
 export class ParallelProcessor {
   constructor(private repo: DataRepository) {}
@@ -40,7 +43,7 @@ export class ParallelProcessor {
 
   public async processBatch(options: ParallelProcessorOptions): Promise<{ batch: Batch; jobs: Job[] }> {
     const jobCount = Math.max(1, Math.min(500, options.jobCount));
-    const processingMs = options.jobProcessingMs ?? 40;
+    const processingMs = options.simulationDelayMs ?? options.jobProcessingMs ?? 0;
 
     const batchId = `batch-parallel-${randomUUID()}`;
     const startedAt = new Date().toISOString();
@@ -51,10 +54,12 @@ export class ParallelProcessor {
       totalJobs: jobCount,
       completedJobs: 0,
       failedJobs: 0,
+      queuedJobs: jobCount,
       startedAt,
     };
 
     await this.repo.createBatch(batch);
+    globalEventLogService.log('BATCH', `[Parallel] Initialized batch ${batchId} for ${jobCount} jobs`, 'INFO', batchId);
 
     const jobs: Job[] = [];
     const sqsMessages: SQSMessagePayload[] = [];
@@ -69,6 +74,7 @@ export class ParallelProcessor {
         batchId,
         status: 'QUEUED',
         createdAt: new Date().toISOString(),
+        mode: 'PARALLEL',
       };
 
       await this.repo.createJob(job);
@@ -80,6 +86,7 @@ export class ParallelProcessor {
         jobIndex: i,
         totalJobs: jobCount,
         processingMs,
+        simulationDelayMs: processingMs,
         isPoisonPill,
       });
     }
@@ -104,28 +111,43 @@ export class ParallelProcessor {
             })
           );
         }
-        console.log(`[ParallelProcessor] Successfully dispatched ${sqsMessages.length} jobs to SQS queue: ${queueUrl}`);
+        globalEventLogService.log(
+          'SQS',
+          `[Parallel] Dispatched ${sqsMessages.length} jobs to SQS queue (${queueUrl}) in chunks of 10`,
+          'SUCCESS',
+          batchId
+        );
+        globalEventLogService.log(
+          'LAMBDA',
+          `[Parallel] AWS SQS Event Source Mapping polling backlog; dynamic Lambda autoscaling active`,
+          'INFO',
+          batchId
+        );
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        console.warn(`[ParallelProcessor Warning] SQS dispatch failed, proceeding with local worker processing: ${errMsg}`);
+        globalEventLogService.log('SQS', `[Parallel Warning] SQS dispatch error: ${errMsg}`, 'WARN', batchId);
+        // Fall back to local worker simulation if SQS dispatch fails
+        setImmediate(() => {
+          this.dispatchBackgroundWorkers(batchId, sqsMessages).catch(console.error);
+        });
       }
+    } else {
+      // Local fallback for offline development / unit tests
+      setImmediate(() => {
+        this.dispatchBackgroundWorkers(batchId, sqsMessages).catch(console.error);
+      });
     }
 
-    // Step 3: Trigger decoupled asynchronous worker processing in background (non-blocking)
-    setImmediate(() => {
-      this.dispatchBackgroundWorkers(batchId, sqsMessages).catch(console.error);
-    });
-
-    // Return IMMEDIATELY while jobs are in QUEUED status (API does NOT process jobs synchronously)
+    // Return IMMEDIATELY while jobs are in QUEUED status (Decoupled event-driven model)
     return { batch, jobs };
   }
 
   /**
    * Background Async Worker Pool.
-   * Simulates asynchronous SQS consumer worker handling in background when running locally.
+   * Simulates asynchronous SQS consumer worker handling in background only when running offline or in unit tests.
    */
   private async dispatchBackgroundWorkers(batchId: string, messages: SQSMessagePayload[]): Promise<void> {
-    const maxConcurrency = 20;
+    const maxConcurrency = 10;
 
     const processSingleWorker = async (msg: SQSMessagePayload) => {
       // Check Idempotency Key
@@ -134,9 +156,12 @@ export class ParallelProcessor {
       }
 
       const workerStartedAt = new Date().toISOString();
+      const mockWorkerId = `local-worker-${(msg.jobIndex % 10) + 1}`;
       await this.repo.updateJob(msg.jobId, {
         status: 'PROCESSING',
         startedAt: workerStartedAt,
+        workerId: mockWorkerId,
+        requestId: mockWorkerId,
       });
 
       try {
@@ -154,6 +179,9 @@ export class ParallelProcessor {
           status: 'COMPLETED',
           completedAt: workerCompletedAt,
           duration,
+          processingTime: duration,
+          workerId: mockWorkerId,
+          requestId: mockWorkerId,
           result,
         });
 
@@ -163,6 +191,7 @@ export class ParallelProcessor {
           const isFinished = completedJobs + currentBatch.failedJobs >= currentBatch.totalJobs;
           await this.repo.updateBatch(batchId, {
             completedJobs,
+            queuedJobs: Math.max(0, currentBatch.totalJobs - completedJobs - currentBatch.failedJobs),
             ...(isFinished ? { completedAt: new Date().toISOString(), totalDuration: Date.now() - new Date(currentBatch.startedAt).getTime() } : {}),
           });
         }
@@ -170,6 +199,8 @@ export class ParallelProcessor {
         await this.repo.updateJob(msg.jobId, {
           status: 'FAILED',
           error: err.message || 'Worker processing failed',
+          workerId: mockWorkerId,
+          requestId: mockWorkerId,
         });
 
         const currentBatch = await this.repo.getBatch(batchId);
@@ -178,6 +209,7 @@ export class ParallelProcessor {
           const isFinished = currentBatch.completedJobs + failedJobs >= currentBatch.totalJobs;
           await this.repo.updateBatch(batchId, {
             failedJobs,
+            queuedJobs: Math.max(0, currentBatch.totalJobs - currentBatch.completedJobs - failedJobs),
             ...(isFinished ? { completedAt: new Date().toISOString(), totalDuration: Date.now() - new Date(currentBatch.startedAt).getTime() } : {}),
           });
         }
