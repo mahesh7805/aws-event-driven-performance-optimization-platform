@@ -14,6 +14,7 @@ import {
   Activity,
   Check,
   Radio,
+  List,
 } from 'lucide-react';
 import {
   runParallelBatch,
@@ -29,6 +30,8 @@ interface QueueJobItem {
   status: 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
   workerId?: string;
   duration?: number;
+  result?: any;
+  error?: string;
 }
 
 export const LiveQueueVisualizer: React.FC = () => {
@@ -44,6 +47,7 @@ export const LiveQueueVisualizer: React.FC = () => {
   const [isSyncingBatches, setIsSyncingBatches] = useState<boolean>(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [inspectingBatchId, setInspectingBatchId] = useState<string | null>(null);
+  const [jobStatusFilter, setJobStatusFilter] = useState<'ALL' | 'COMPLETED' | 'PROCESSING' | 'QUEUED' | 'FAILED'>('ALL');
 
   const fetchSyncStatus = async () => {
     try {
@@ -110,6 +114,8 @@ export const LiveQueueVisualizer: React.FC = () => {
                 status: j.status as any,
                 workerId: `Lambda Worker ${(i % 10) + 1}`,
                 duration: j.duration,
+                result: j.result,
+                error: j.error,
               }))
             );
             if (updated.batch.completedJobs + updated.batch.failedJobs >= updated.batch.totalJobs) {
@@ -145,6 +151,8 @@ export const LiveQueueVisualizer: React.FC = () => {
             status: j.status as any,
             workerId: `Lambda Worker ${(i % 10) + 1}`,
             duration: j.duration,
+            result: j.result,
+            error: j.error,
           }))
         );
       }
@@ -342,9 +350,9 @@ export const LiveQueueVisualizer: React.FC = () => {
               </span>
             </div>
 
-            <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
               <AnimatePresence>
-                {queued.slice(0, 15).map((job) => (
+                {queued.map((job) => (
                   <motion.div
                     key={job.id}
                     layout
@@ -353,14 +361,11 @@ export const LiveQueueVisualizer: React.FC = () => {
                     exit={{ opacity: 0, scale: 0.9 }}
                     className="bg-white border border-slate-200 p-2.5 rounded-lg text-xs font-mono shadow-xs flex items-center justify-between text-slate-700"
                   >
-                    <span className="truncate max-w-[120px]">{job.id}</span>
+                    <span className="truncate max-w-[140px]" title={job.id}>{job.id}</span>
                     <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded shrink-0">Enqueued</span>
                   </motion.div>
                 ))}
               </AnimatePresence>
-              {queued.length > 15 && (
-                <div className="text-[10px] text-slate-400 text-center font-mono">+ {queued.length - 15} more in SQS queue</div>
-              )}
               {queued.length === 0 && (
                 <p className="text-xs text-slate-400 text-center py-10 italic">Queue empty</p>
               )}
@@ -376,9 +381,9 @@ export const LiveQueueVisualizer: React.FC = () => {
               </span>
             </div>
 
-            <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
               <AnimatePresence>
-                {processing.slice(0, 15).map((job) => (
+                {processing.map((job) => (
                   <motion.div
                     key={job.id}
                     layout
@@ -388,16 +393,13 @@ export const LiveQueueVisualizer: React.FC = () => {
                     className="bg-white border border-sky-300 p-2.5 rounded-lg text-xs font-mono shadow-xs space-y-1"
                   >
                     <div className="flex justify-between items-center text-sky-900 font-semibold">
-                      <span className="truncate max-w-[120px]">{job.id}</span>
+                      <span className="truncate max-w-[140px]" title={job.id}>{job.id}</span>
                       <span className="inline-flex h-2 w-2 rounded-full bg-sky-500 animate-ping"></span>
                     </div>
                     <div className="text-[10px] text-sky-600 font-sans">{job.workerId}</div>
                   </motion.div>
                 ))}
               </AnimatePresence>
-              {processing.length > 15 && (
-                <div className="text-[10px] text-sky-500 text-center font-mono">+ {processing.length - 15} active workers</div>
-              )}
               {processing.length === 0 && (
                 <p className="text-xs text-sky-400 text-center py-10 italic">No active workers</p>
               )}
@@ -413,9 +415,9 @@ export const LiveQueueVisualizer: React.FC = () => {
               </span>
             </div>
 
-            <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
               <AnimatePresence>
-                {completed.slice(0, 15).map((job) => (
+                {completed.map((job) => (
                   <motion.div
                     key={job.id}
                     layout
@@ -425,15 +427,12 @@ export const LiveQueueVisualizer: React.FC = () => {
                   >
                     <div className="flex items-center space-x-1.5 min-w-0">
                       <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                      <span className="truncate max-w-[100px]">{job.id}</span>
+                      <span className="truncate max-w-[120px]" title={job.id}>{job.id}</span>
                     </div>
-                    <span className="text-[10px] text-slate-400 font-sans shrink-0">{job.duration}ms</span>
+                    <span className="text-[10px] text-slate-500 font-sans shrink-0 font-semibold">{job.duration ? `${job.duration}ms` : '—'}</span>
                   </motion.div>
                 ))}
               </AnimatePresence>
-              {completed.length > 15 && (
-                <div className="text-[10px] text-emerald-600 text-center font-mono">+ {completed.length - 15} completed jobs</div>
-              )}
               {completed.length === 0 && (
                 <p className="text-xs text-emerald-400 text-center py-10 italic">No completed jobs yet</p>
               )}
@@ -449,7 +448,7 @@ export const LiveQueueVisualizer: React.FC = () => {
               </span>
             </div>
 
-            <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
               {failed.map((job) => (
                 <div key={job.id} className="bg-white border border-red-200 p-2.5 rounded-lg text-xs font-mono shadow-xs text-red-800">
                   <AlertCircle className="h-3.5 w-3.5 text-red-600 inline mr-1" />
@@ -462,6 +461,114 @@ export const LiveQueueVisualizer: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Complete Job Inventory for Inspected Batch */}
+        {batchId && jobs.length > 0 && (
+          <div className="border-t border-slate-100 pt-5 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center space-x-2">
+                <List className="h-4 w-4 text-indigo-600" />
+                <h3 className="text-sm font-semibold text-slate-900">
+                  All Jobs in Inspected Batch ({jobs.length} Total Jobs)
+                </h3>
+                <span className="text-xs text-slate-400 font-mono">
+                  {batchId}
+                </span>
+              </div>
+
+              {/* Status Filter Tabs */}
+              <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-lg text-xs">
+                {(['ALL', 'COMPLETED', 'PROCESSING', 'QUEUED', 'FAILED'] as const).map((filter) => {
+                  const count =
+                    filter === 'ALL'
+                      ? jobs.length
+                      : filter === 'COMPLETED'
+                      ? completed.length
+                      : filter === 'PROCESSING'
+                      ? processing.length
+                      : filter === 'QUEUED'
+                      ? queued.length
+                      : failed.length;
+
+                  return (
+                    <button
+                      key={filter}
+                      onClick={() => setJobStatusFilter(filter)}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
+                        jobStatusFilter === filter
+                          ? 'bg-white text-indigo-700 shadow-xs font-semibold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {filter} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Jobs Table */}
+            <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <div className="max-h-[380px] overflow-y-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
+                    <tr>
+                      <th className="py-2.5 px-3 w-12 text-center">#</th>
+                      <th className="py-2.5 px-3">Job ID</th>
+                      <th className="py-2.5 px-3">Status</th>
+                      <th className="py-2.5 px-3">Duration</th>
+                      <th className="py-2.5 px-3">Worker Assignment</th>
+                      <th className="py-2.5 px-3">Result / Checksum</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {jobs
+                      .filter((j) => jobStatusFilter === 'ALL' || j.status === jobStatusFilter)
+                      .map((job, idx) => (
+                        <tr key={job.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-2 px-3 text-center text-slate-400 font-mono text-[11px]">
+                            {idx + 1}
+                          </td>
+                          <td className="py-2 px-3 font-mono font-medium text-slate-800">
+                            {job.id}
+                          </td>
+                          <td className="py-2 px-3">
+                            <span
+                              className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                job.status === 'COMPLETED'
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : job.status === 'PROCESSING'
+                                  ? 'bg-sky-50 text-sky-700 border border-sky-200'
+                                  : job.status === 'FAILED'
+                                  ? 'bg-red-50 text-red-700 border border-red-200'
+                                  : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                              }`}
+                            >
+                              {job.status === 'COMPLETED' && <Check className="h-2.5 w-2.5" />}
+                              <span>{job.status}</span>
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 font-mono text-slate-600 font-medium">
+                            {job.duration ? `${job.duration} ms` : '—'}
+                          </td>
+                          <td className="py-2 px-3 text-slate-600 font-mono text-[11px]">
+                            {job.workerId || 'Worker 1'}
+                          </td>
+                          <td className="py-2 px-3 font-mono text-slate-500 text-[11px]">
+                            {job.result?.computedChecksum
+                              ? `Checksum: ${job.result.computedChecksum}`
+                              : job.error
+                              ? `Error: ${job.error}`
+                              : 'Ready / Queued'}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Created Batches Registry (DynamoDB Real-Time Sync) */}
