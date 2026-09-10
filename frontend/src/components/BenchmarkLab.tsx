@@ -52,7 +52,7 @@ export const BenchmarkLab: React.FC<BenchmarkLabProps> = ({ onBenchmarkComplete 
         setStatusMessage(`Executing Serial Baseline for ${effectiveJobCount} jobs...`);
         const serialRes = await runSerialBatch(effectiveJobCount, effectiveDelayMs);
         const batch = serialRes.batch;
-        const dur = batch.totalDuration || 100;
+        const dur = batch.durationMs || batch.totalDuration || 100;
         const avgDur = batch.averageJobDuration || Math.round(dur / effectiveJobCount);
         const tp = batch.throughput || Math.round((effectiveJobCount / (dur / 1000)) * 10) / 10;
 
@@ -78,12 +78,12 @@ export const BenchmarkLab: React.FC<BenchmarkLabProps> = ({ onBenchmarkComplete 
 
         // Poll until all jobs are processed on AWS Lambda
         let attempts = 0;
-        const maxAttempts = 60;
+        const maxAttempts = 120;
         let finalBatch = parallelRes.batch;
 
         while (attempts < maxAttempts) {
           attempts++;
-          await new Promise((r) => setTimeout(r, 500));
+          await new Promise((r) => setTimeout(r, 1000));
           const details = await getBatchDetails(batchId);
           finalBatch = details.batch;
           const completedCount = finalBatch.completedJobs || 0;
@@ -95,7 +95,7 @@ export const BenchmarkLab: React.FC<BenchmarkLabProps> = ({ onBenchmarkComplete 
           }
         }
 
-        const dur = finalBatch.totalDuration || (attempts * 500);
+        const dur = finalBatch.durationMs || finalBatch.totalDuration || Math.max(1, Date.now() - new Date(finalBatch.startedAt).getTime());
         const avgDur = finalBatch.averageJobDuration || 85;
         const tp = finalBatch.throughput || Math.round((finalBatch.completedJobs / (dur / 1000)) * 10) / 10;
         const peakConc = finalBatch.peakConcurrency || 1;

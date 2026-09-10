@@ -222,7 +222,7 @@ export const LiveQueueVisualizer: React.FC = () => {
 
       // If serial mode, batch finishes immediately in the response!
       if (executionMode === 'SERIAL') {
-        const dur = res.batch.totalDuration || 100;
+        const dur = res.batch.durationMs || res.batch.totalDuration || 100;
         const tp = res.batch.throughput || Math.round((effectiveJobCount / (dur / 1000)) * 10) / 10;
         setSerialBaseline({
           durationMs: dur,
@@ -239,7 +239,7 @@ export const LiveQueueVisualizer: React.FC = () => {
 
       // If parallel mode, poll batch until all jobs are processed on AWS Lambda
       let attempts = 0;
-      const maxAttempts = 60; // 60 * 500ms = 30 seconds max polling
+      const maxAttempts = 120; // 120 * 1000ms = 120 seconds max polling
       const pollInterval = setInterval(async () => {
         attempts++;
         try {
@@ -274,7 +274,7 @@ export const LiveQueueVisualizer: React.FC = () => {
             clearInterval(pollInterval);
             setRunning(false);
 
-            const dur = details.batch.totalDuration || (attempts * 500);
+            const dur = details.batch.durationMs || details.batch.totalDuration || Math.max(1, Date.now() - new Date(details.batch.startedAt).getTime());
             const tp = details.batch.throughput || Math.round((completedCount / (dur / 1000)) * 10) / 10;
             const peakConc = details.batch.peakConcurrency || 1;
 

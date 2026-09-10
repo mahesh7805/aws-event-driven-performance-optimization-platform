@@ -2,6 +2,7 @@ export interface BatchResponse {
   batch: {
     batchId: string;
     mode: 'SERIAL' | 'PARALLEL' | 'PARALLEL_CACHED';
+    status?: 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | string;
     totalJobs: number;
     completedJobs: number;
     failedJobs: number;
@@ -9,6 +10,7 @@ export interface BatchResponse {
     startedAt: string;
     completedAt?: string;
     totalDuration?: number;
+    durationMs?: number;
     averageJobDuration?: number;
     throughput?: number;
     peakConcurrency?: number;
