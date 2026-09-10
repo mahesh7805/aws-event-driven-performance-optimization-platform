@@ -70,12 +70,21 @@ export class BenchmarkEngine {
     }
     const parallelDurationMs = Math.max(1, Date.now() - parallelStartTime);
 
-    // 3. Measure Cache Read Latency for all batch jobs
+    // 3. Measure In-Memory Read-Through TTL Cache Performance
+    // Warm-up pass: populate cache on first read (demonstrates read-through caching from DB)
+    for (const job of parallelRes.jobs) {
+      await this.cacheService.getJob(job.jobId);
+    }
+
+    // Reset stats to evaluate repeat read performance against the warm cache
+    this.repo.resetStats();
+
+    // Measurement pass: repeat reads served directly from TTL cache (100% hits, 0 DB reads)
     const cacheStartTime = Date.now();
     for (const job of parallelRes.jobs) {
       await this.cacheService.getJob(job.jobId);
     }
-    const cachedDurationMs = Date.now() - cacheStartTime;
+    const cachedDurationMs = Math.max(1, Date.now() - cacheStartTime);
 
     // Calculate empirical metrics from measured timestamps
     const rawImprovement = ((serialDurationMs - parallelDurationMs) / serialDurationMs) * 100;

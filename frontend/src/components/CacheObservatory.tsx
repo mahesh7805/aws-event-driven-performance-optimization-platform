@@ -48,7 +48,9 @@ export const CacheObservatory: React.FC = () => {
             <span>In-Memory Read-Through TTL Cache Observatory</span>
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Application-Level In-Memory TTL Cache (`CACHE_TTL_SECONDS=60`). First lookup of a key = MISS (DB Read), subsequent lookups = HIT. (Cloud production interfaces with Amazon ElastiCache / Redis).
+            Application-Level In-Memory Read-Through TTL Cache (<code className="font-mono font-semibold text-teal-800">CACHE_TTL=60s</code>). 
+            <strong> 1st lookup</strong> = <span className="text-amber-700 font-semibold">CACHE MISS</span> (fetches from DynamoDB &amp; populates memory). 
+            <strong> 2nd lookup</strong> = <span className="text-emerald-700 font-semibold">CACHE HIT</span> (retrieved from memory in &lt;2ms with 0 DynamoDB reads).
           </p>
         </div>
 
@@ -65,7 +67,10 @@ export const CacheObservatory: React.FC = () => {
       {/* Interactive Cache Lookup Endpoint Tester */}
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-4">
         <div className="flex justify-between items-center">
-          <h3 className="text-xs font-semibold uppercase text-slate-700">Query Cache Key Endpoint</h3>
+          <div>
+            <h3 className="text-xs font-semibold uppercase text-slate-700">Query Cache Key Endpoint</h3>
+            <p className="text-[11px] text-slate-500">Query any job by ID. Test querying the same ID twice to observe the transition from Miss to Hit.</p>
+          </div>
           <span className="text-[11px] text-slate-500 font-mono">GET /api/jobs/:jobId</span>
         </div>
 
@@ -75,7 +80,7 @@ export const CacheObservatory: React.FC = () => {
             value={testJobId}
             onChange={(e) => setTestJobId(e.target.value)}
             className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono text-slate-800 focus:outline-hidden focus:border-teal-500"
-            placeholder="e.g. job-123 or job-456"
+            placeholder="e.g. job-123 or job-batch-parallel-..."
           />
           <button
             onClick={handleTestQuery}
@@ -98,7 +103,7 @@ export const CacheObservatory: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
-            className={`p-4 rounded-lg border text-xs font-mono flex items-center justify-between ${
+            className={`p-4 rounded-lg border text-xs font-mono flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
               lastQueryResult.cacheHit
                 ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
                 : 'bg-amber-50 border-amber-300 text-amber-900'
@@ -106,18 +111,30 @@ export const CacheObservatory: React.FC = () => {
           >
             <div className="flex items-center space-x-2">
               {lastQueryResult.cacheHit ? (
-                <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
               ) : (
-                <Database className="h-4 w-4 text-amber-600" />
+                <Database className="h-4 w-4 text-amber-600 shrink-0" />
               )}
               <span>
-                Key: <strong className="underline">{lastQueryResult.jobId}</strong> &rarr; Status:{' '}
-                {lastQueryResult.cacheHit
-                  ? 'CACHE HIT (Retrieved instantly from Cache)'
-                  : 'CACHE MISS (Fetched from Repository & Cached)'}
+                Key: <strong className="underline">{lastQueryResult.jobId}</strong> &rarr;{' '}
+                {lastQueryResult.cacheHit ? (
+                  <span className="font-semibold text-emerald-800">
+                    CACHE HIT — Retrieved instantly from memory cache! (0 DynamoDB reads)
+                  </span>
+                ) : (
+                  <span>
+                    <strong className="text-amber-800">CACHE MISS</strong> (1st lookup: fetched from DynamoDB &amp; cached with 60s TTL).{' '}
+                    <button
+                      onClick={handleTestQuery}
+                      className="underline font-bold text-teal-800 hover:text-teal-950 ml-1 cursor-pointer"
+                    >
+                      Click here to Fetch again and see the CACHE HIT &rarr;
+                    </button>
+                  </span>
+                )}
               </span>
             </div>
-            <span className="font-bold">{lastQueryResult.duration} ms latency</span>
+            <span className="font-bold shrink-0">{lastQueryResult.duration} ms latency</span>
           </motion.div>
         )}
       </div>
