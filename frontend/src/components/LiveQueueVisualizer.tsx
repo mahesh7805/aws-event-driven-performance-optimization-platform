@@ -14,7 +14,8 @@ import {
   Activity,
   Check,
   Radio,
-  List,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import {
   runParallelBatch,
@@ -47,7 +48,7 @@ export const LiveQueueVisualizer: React.FC = () => {
   const [isSyncingBatches, setIsSyncingBatches] = useState<boolean>(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [inspectingBatchId, setInspectingBatchId] = useState<string | null>(null);
-  const [jobStatusFilter, setJobStatusFilter] = useState<'ALL' | 'COMPLETED' | 'PROCESSING' | 'QUEUED' | 'FAILED'>('ALL');
+  const [isCompletedExpanded, setIsCompletedExpanded] = useState<boolean>(false);
 
   const fetchSyncStatus = async () => {
     try {
@@ -143,6 +144,7 @@ export const LiveQueueVisualizer: React.FC = () => {
     try {
       setInspectingBatchId(targetBatchId);
       setBatchId(targetBatchId);
+      setIsCompletedExpanded(true);
       const updated = await getBatchDetails(targetBatchId);
       if (updated && updated.jobs) {
         setJobs(
@@ -339,232 +341,248 @@ export const LiveQueueVisualizer: React.FC = () => {
           </div>
         )}
 
-        {/* 4 Pipeline Columns */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {/* Column 1: SQS Queued */}
-          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-semibold uppercase text-slate-600">1. SQS Queued</span>
-              <span className="text-xs bg-slate-200 text-slate-800 font-mono px-2 py-0.5 rounded-full font-bold">
-                {queued.length}
-              </span>
-            </div>
-
-            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-              <AnimatePresence>
-                {queued.map((job) => (
-                  <motion.div
-                    key={job.id}
-                    layout
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    className="bg-white border border-slate-200 p-2.5 rounded-lg text-xs font-mono shadow-xs flex items-center justify-between text-slate-700"
-                  >
-                    <span className="truncate max-w-[140px]" title={job.id}>{job.id}</span>
-                    <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded shrink-0">Enqueued</span>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-              {queued.length === 0 && (
-                <p className="text-xs text-slate-400 text-center py-10 italic">Queue empty</p>
-              )}
-            </div>
-          </div>
-
-          {/* Column 2: Lambda Processing */}
-          <div className="bg-sky-50/60 p-4 rounded-xl border border-sky-200">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-semibold uppercase text-sky-800">2. Lambda Active</span>
-              <span className="text-xs bg-sky-200 text-sky-900 font-mono px-2 py-0.5 rounded-full font-bold">
-                {processing.length}
-              </span>
-            </div>
-
-            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-              <AnimatePresence>
-                {processing.map((job) => (
-                  <motion.div
-                    key={job.id}
-                    layout
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 10 }}
-                    className="bg-white border border-sky-300 p-2.5 rounded-lg text-xs font-mono shadow-xs space-y-1"
-                  >
-                    <div className="flex justify-between items-center text-sky-900 font-semibold">
-                      <span className="truncate max-w-[140px]" title={job.id}>{job.id}</span>
-                      <span className="inline-flex h-2 w-2 rounded-full bg-sky-500 animate-ping"></span>
-                    </div>
-                    <div className="text-[10px] text-sky-600 font-sans">{job.workerId}</div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-              {processing.length === 0 && (
-                <p className="text-xs text-sky-400 text-center py-10 italic">No active workers</p>
-              )}
-            </div>
-          </div>
-
-          {/* Column 3: Completed */}
-          <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-semibold uppercase text-emerald-800">3. Completed (DDB)</span>
-              <span className="text-xs bg-emerald-200 text-emerald-900 font-mono px-2 py-0.5 rounded-full font-bold">
-                {completed.length}
-              </span>
-            </div>
-
-            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-              <AnimatePresence>
-                {completed.map((job) => (
-                  <motion.div
-                    key={job.id}
-                    layout
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="bg-white border border-emerald-200 p-2.5 rounded-lg text-xs font-mono shadow-xs flex justify-between items-center text-emerald-900"
-                  >
-                    <div className="flex items-center space-x-1.5 min-w-0">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                      <span className="truncate max-w-[120px]" title={job.id}>{job.id}</span>
-                    </div>
-                    <span className="text-[10px] text-slate-500 font-sans shrink-0 font-semibold">{job.duration ? `${job.duration}ms` : '—'}</span>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-              {completed.length === 0 && (
-                <p className="text-xs text-emerald-400 text-center py-10 italic">No completed jobs yet</p>
-              )}
-            </div>
-          </div>
-
-          {/* Column 4: DLQ / Failed */}
-          <div className="bg-red-50/50 p-4 rounded-xl border border-red-200">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-semibold uppercase text-red-800">4. DLQ / Failed</span>
-              <span className="text-xs bg-red-200 text-red-900 font-mono px-2 py-0.5 rounded-full font-bold">
-                {failed.length}
-              </span>
-            </div>
-
-            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-              {failed.map((job) => (
-                <div key={job.id} className="bg-white border border-red-200 p-2.5 rounded-lg text-xs font-mono shadow-xs text-red-800">
-                  <AlertCircle className="h-3.5 w-3.5 text-red-600 inline mr-1" />
-                  {job.id}
+        {/* Pipeline Views: Either Expanded 3. Completed (DDB) or Standard 4 Columns */}
+        {isCompletedExpanded ? (
+          <div className="space-y-4">
+            {/* Top Compact Summary Strip for 1. Queued, 2. Active, 4. DLQ */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex justify-between items-center">
+                <div className="flex items-center space-x-2">
+                  <span className="h-2 w-2 rounded-full bg-slate-400" />
+                  <span className="text-xs font-semibold uppercase text-slate-700">1. SQS Queued</span>
                 </div>
-              ))}
-              {failed.length === 0 && (
-                <p className="text-xs text-red-300 text-center py-10 italic">0 failures (100% healthy)</p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Complete Job Inventory for Inspected Batch */}
-        {batchId && jobs.length > 0 && (
-          <div className="border-t border-slate-100 pt-5 space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center space-x-2">
-                <List className="h-4 w-4 text-indigo-600" />
-                <h3 className="text-sm font-semibold text-slate-900">
-                  All Jobs in Inspected Batch ({jobs.length} Total Jobs)
-                </h3>
-                <span className="text-xs text-slate-400 font-mono">
-                  {batchId}
+                <span className="text-xs bg-slate-200 text-slate-800 font-mono px-2 py-0.5 rounded-full font-bold">
+                  {queued.length}
                 </span>
               </div>
 
-              {/* Status Filter Tabs */}
-              <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-lg text-xs">
-                {(['ALL', 'COMPLETED', 'PROCESSING', 'QUEUED', 'FAILED'] as const).map((filter) => {
-                  const count =
-                    filter === 'ALL'
-                      ? jobs.length
-                      : filter === 'COMPLETED'
-                      ? completed.length
-                      : filter === 'PROCESSING'
-                      ? processing.length
-                      : filter === 'QUEUED'
-                      ? queued.length
-                      : failed.length;
+              <div className="bg-sky-50/60 p-3 rounded-xl border border-sky-200 flex justify-between items-center">
+                <div className="flex items-center space-x-2">
+                  <span className="h-2 w-2 rounded-full bg-sky-500 animate-ping" />
+                  <span className="text-xs font-semibold uppercase text-sky-800">2. Lambda Active</span>
+                </div>
+                <span className="text-xs bg-sky-200 text-sky-900 font-mono px-2 py-0.5 rounded-full font-bold">
+                  {processing.length}
+                </span>
+              </div>
 
-                  return (
-                    <button
-                      key={filter}
-                      onClick={() => setJobStatusFilter(filter)}
-                      className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
-                        jobStatusFilter === filter
-                          ? 'bg-white text-indigo-700 shadow-xs font-semibold'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      {filter} ({count})
-                    </button>
-                  );
-                })}
+              <div className="bg-red-50/50 p-3 rounded-xl border border-red-200 flex justify-between items-center">
+                <div className="flex items-center space-x-2">
+                  <span className="h-2 w-2 rounded-full bg-red-400" />
+                  <span className="text-xs font-semibold uppercase text-red-800">4. DLQ / Failed</span>
+                </div>
+                <span className="text-xs bg-red-200 text-red-900 font-mono px-2 py-0.5 rounded-full font-bold">
+                  {failed.length}
+                </span>
               </div>
             </div>
 
-            {/* Jobs Table */}
-            <div className="border border-slate-200 rounded-xl overflow-hidden">
-              <div className="max-h-[380px] overflow-y-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
-                    <tr>
-                      <th className="py-2.5 px-3 w-12 text-center">#</th>
-                      <th className="py-2.5 px-3">Job ID</th>
-                      <th className="py-2.5 px-3">Status</th>
-                      <th className="py-2.5 px-3">Duration</th>
-                      <th className="py-2.5 px-3">Worker Assignment</th>
-                      <th className="py-2.5 px-3">Result / Checksum</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {jobs
-                      .filter((j) => jobStatusFilter === 'ALL' || j.status === jobStatusFilter)
-                      .map((job, idx) => (
-                        <tr key={job.id} className="hover:bg-slate-50/80 transition-colors">
-                          <td className="py-2 px-3 text-center text-slate-400 font-mono text-[11px]">
-                            {idx + 1}
-                          </td>
-                          <td className="py-2 px-3 font-mono font-medium text-slate-800">
-                            {job.id}
-                          </td>
-                          <td className="py-2 px-3">
-                            <span
-                              className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                                job.status === 'COMPLETED'
-                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                  : job.status === 'PROCESSING'
-                                  ? 'bg-sky-50 text-sky-700 border border-sky-200'
-                                  : job.status === 'FAILED'
-                                  ? 'bg-red-50 text-red-700 border border-red-200'
-                                  : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                              }`}
-                            >
-                              {job.status === 'COMPLETED' && <Check className="h-2.5 w-2.5" />}
-                              <span>{job.status}</span>
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 font-mono text-slate-600 font-medium">
-                            {job.duration ? `${job.duration} ms` : '—'}
-                          </td>
-                          <td className="py-2 px-3 text-slate-600 font-mono text-[11px]">
-                            {job.workerId || 'Worker 1'}
-                          </td>
-                          <td className="py-2 px-3 font-mono text-slate-500 text-[11px]">
-                            {job.result?.computedChecksum
-                              ? `Checksum: ${job.result.computedChecksum}`
-                              : job.error
-                              ? `Error: ${job.error}`
-                              : 'Ready / Queued'}
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
+            {/* Expanded 3. Completed (DDB) Section */}
+            <div className="bg-emerald-50/60 p-5 rounded-xl border border-emerald-200 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-200/60 pb-3">
+                <div className="flex items-center space-x-2.5">
+                  <div className="p-1.5 bg-emerald-100 rounded-lg text-emerald-700">
+                    <CheckCircle2 className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-900">
+                        3. Completed (DDB) — All Completed Jobs
+                      </h3>
+                      <span className="text-xs bg-emerald-200 text-emerald-900 font-mono px-2.5 py-0.5 rounded-full font-bold">
+                        {completed.length} Completed
+                      </span>
+                    </div>
+                    <p className="text-xs text-emerald-700 mt-0.5">
+                      Displaying all completed jobs with full unabbreviated job names and measured execution speed.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setIsCompletedExpanded(false)}
+                    className="inline-flex items-center space-x-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <Minimize2 className="h-3.5 w-3.5" />
+                    <span>Collapse to 4 Columns</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Grid of All Completed Jobs with Full Name & Speed */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[460px] overflow-y-auto pr-1">
+                {completed.map((job, idx) => (
+                  <motion.div
+                    key={job.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.96 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-white border border-emerald-200 rounded-xl p-3.5 shadow-xs space-y-2.5 hover:border-emerald-400 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start space-x-2 min-w-0">
+                        <span className="text-slate-400 font-mono text-xs mt-0.5 shrink-0 font-semibold">
+                          #{idx + 1}
+                        </span>
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600 mt-0.5 shrink-0" />
+                        <span className="font-mono text-xs text-slate-800 font-medium break-all select-all leading-relaxed">
+                          {job.id}
+                        </span>
+                      </div>
+
+                      <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold font-mono bg-emerald-100 text-emerald-800 border border-emerald-200 shrink-0 shadow-2xs">
+                        <Zap className="h-3 w-3 text-emerald-600" />
+                        <span>{job.duration ? `${job.duration} ms` : '—'}</span>
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-100 font-mono">
+                      <span className="text-slate-600 font-sans">{job.workerId || 'Lambda Worker'}</span>
+                      <span className="text-emerald-700 font-semibold">
+                        Speed: {job.duration ? `${job.duration} ms latency` : 'Completed'}
+                      </span>
+                    </div>
+                  </motion.div>
+                ))}
+
+                {completed.length === 0 && (
+                  <div className="col-span-full py-12 text-center text-emerald-600/70 text-xs italic">
+                    No completed jobs in this batch yet
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Standard 4 Pipeline Columns */
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {/* Column 1: SQS Queued */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-semibold uppercase text-slate-600">1. SQS Queued</span>
+                <span className="text-xs bg-slate-200 text-slate-800 font-mono px-2 py-0.5 rounded-full font-bold">
+                  {queued.length}
+                </span>
+              </div>
+
+              <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                <AnimatePresence>
+                  {queued.map((job) => (
+                    <motion.div
+                      key={job.id}
+                      layout
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      className="bg-white border border-slate-200 p-2.5 rounded-lg text-xs font-mono shadow-xs flex items-center justify-between text-slate-700"
+                    >
+                      <span className="truncate max-w-[140px]" title={job.id}>{job.id}</span>
+                      <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded shrink-0">Enqueued</span>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+                {queued.length === 0 && (
+                  <p className="text-xs text-slate-400 text-center py-10 italic">Queue empty</p>
+                )}
+              </div>
+            </div>
+
+            {/* Column 2: Lambda Processing */}
+            <div className="bg-sky-50/60 p-4 rounded-xl border border-sky-200">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-semibold uppercase text-sky-800">2. Lambda Active</span>
+                <span className="text-xs bg-sky-200 text-sky-900 font-mono px-2 py-0.5 rounded-full font-bold">
+                  {processing.length}
+                </span>
+              </div>
+
+              <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                <AnimatePresence>
+                  {processing.map((job) => (
+                    <motion.div
+                      key={job.id}
+                      layout
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 10 }}
+                      className="bg-white border border-sky-300 p-2.5 rounded-lg text-xs font-mono shadow-xs space-y-1"
+                    >
+                      <div className="flex justify-between items-center text-sky-900 font-semibold">
+                        <span className="truncate max-w-[140px]" title={job.id}>{job.id}</span>
+                        <span className="inline-flex h-2 w-2 rounded-full bg-sky-500 animate-ping"></span>
+                      </div>
+                      <div className="text-[10px] text-sky-600 font-sans">{job.workerId}</div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+                {processing.length === 0 && (
+                  <p className="text-xs text-sky-400 text-center py-10 italic">No active workers</p>
+                )}
+              </div>
+            </div>
+
+            {/* Column 3: Completed */}
+            <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-semibold uppercase text-emerald-800">3. Completed (DDB)</span>
+                <div className="flex items-center space-x-1.5">
+                  <span className="text-xs bg-emerald-200 text-emerald-900 font-mono px-2 py-0.5 rounded-full font-bold">
+                    {completed.length}
+                  </span>
+                  <button
+                    onClick={() => setIsCompletedExpanded(true)}
+                    title="Expand 3. Completed (DDB) to show full names & speeds"
+                    className="p-1 rounded bg-white hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors cursor-pointer"
+                  >
+                    <Maximize2 className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                <AnimatePresence>
+                  {completed.map((job) => (
+                    <motion.div
+                      key={job.id}
+                      layout
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="bg-white border border-emerald-200 p-2.5 rounded-lg text-xs font-mono shadow-xs flex justify-between items-center text-emerald-900"
+                    >
+                      <div className="flex items-center space-x-1.5 min-w-0">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                        <span className="truncate max-w-[120px]" title={job.id}>{job.id}</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 font-sans shrink-0 font-semibold">{job.duration ? `${job.duration}ms` : '—'}</span>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+                {completed.length === 0 && (
+                  <p className="text-xs text-emerald-400 text-center py-10 italic">No completed jobs yet</p>
+                )}
+              </div>
+            </div>
+
+            {/* Column 4: DLQ / Failed */}
+            <div className="bg-red-50/50 p-4 rounded-xl border border-red-200">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-semibold uppercase text-red-800">4. DLQ / Failed</span>
+                <span className="text-xs bg-red-200 text-red-900 font-mono px-2 py-0.5 rounded-full font-bold">
+                  {failed.length}
+                </span>
+              </div>
+
+              <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                {failed.map((job) => (
+                  <div key={job.id} className="bg-white border border-red-200 p-2.5 rounded-lg text-xs font-mono shadow-xs text-red-800">
+                    <AlertCircle className="h-3.5 w-3.5 text-red-600 inline mr-1" />
+                    {job.id}
+                  </div>
+                ))}
+                {failed.length === 0 && (
+                  <p className="text-xs text-red-300 text-center py-10 italic">0 failures (100% healthy)</p>
+                )}
               </div>
             </div>
           </div>
