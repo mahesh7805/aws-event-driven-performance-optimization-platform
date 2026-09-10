@@ -63,5 +63,6 @@ Plan: 3 to add, 1 to change, 0 to destroy.
     (busyService as any).currentOperation = 'plan';
 
     await expect(busyService.init()).rejects.toThrow(/Another Terraform operation \(plan\) is currently in progress/);
+    await expect(busyService.destroy()).rejects.toThrow(/Another Terraform operation \(plan\) is currently in progress/);
   });
 });

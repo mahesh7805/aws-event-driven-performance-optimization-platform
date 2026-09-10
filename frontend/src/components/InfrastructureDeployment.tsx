@@ -24,6 +24,7 @@ import {
   runTerraformValidate,
   runTerraformPlan,
   runTerraformApply,
+  runTerraformDestroy,
   getTerraformOutputs,
 } from '../services/apiClient';
 
@@ -34,6 +35,7 @@ export type DeploymentStep =
   | 'planning'
   | 'waiting_approval'
   | 'applying'
+  | 'destroying'
   | 'success'
   | 'failed';
 
@@ -60,6 +62,7 @@ export const InfrastructureDeployment: React.FC = () => {
     rawOutput: string;
   } | null>(null);
   const [showApprovalModal, setShowApprovalModal] = useState<boolean>(false);
+  const [showDestroyModal, setShowDestroyModal] = useState<boolean>(false);
   const [latestOutputs, setLatestOutputs] = useState<Record<string, any> | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
@@ -71,7 +74,8 @@ export const InfrastructureDeployment: React.FC = () => {
     step === 'initializing' ||
     step === 'validating' ||
     step === 'planning' ||
-    step === 'applying';
+    step === 'applying' ||
+    step === 'destroying';
 
   // Initial load: check backend status and load existing outputs
   useEffect(() => {
@@ -279,6 +283,34 @@ export const InfrastructureDeployment: React.FC = () => {
     addLog('warning', 'Deployment cancelled by user. Terraform apply was NOT executed.');
   };
 
+  const handleDestroy = async (): Promise<boolean> => {
+    setShowDestroyModal(false);
+    setStep('destroying');
+    addLog('command', '$ terraform destroy -auto-approve');
+    addLog('warning', '⚠️ Starting destruction of all Terraform-managed AWS infrastructure in ap-south-1...');
+
+    try {
+      const res = await runTerraformDestroy();
+      if (res.stdout) addLog('stdout', res.stdout.trim());
+      if (res.stderr) addLog('stderr', res.stderr.trim());
+
+      if (res.success) {
+        addLog('success', '✓ All infrastructure resources successfully destroyed.');
+        setStep('idle');
+        setLatestOutputs(null);
+        return true;
+      } else {
+        addLog('error', `❌ Terraform destroy failed with exit code ${res.exitCode ?? 1}.`);
+        setStep('failed');
+        return false;
+      }
+    } catch (err: any) {
+      addLog('error', `❌ Connection error: ${err.message}`);
+      setStep('failed');
+      return false;
+    }
+  };
+
   // --- Preferred One-Click Workflow: Deploy Infrastructure ---
 
   const handleDeployWorkflow = async () => {
@@ -388,6 +420,12 @@ export const InfrastructureDeployment: React.FC = () => {
                   <span>● Applying</span>
                 </span>
               )}
+              {step === 'destroying' && (
+                <span className="flex items-center space-x-1.5 text-rose-700 bg-rose-50 border-rose-200">
+                  <Loader2 className="h-3 w-3 animate-spin text-rose-600" />
+                  <span>● Destroying...</span>
+                </span>
+              )}
               {step === 'success' && (
                 <span className="flex items-center space-x-1.5 text-emerald-700 bg-emerald-50 border-emerald-200">
                   <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
@@ -429,7 +467,7 @@ export const InfrastructureDeployment: React.FC = () => {
             </span>
           </div>
 
-          {/* Granular Step Buttons */}
+          {/* Granular Step Buttons & Explicit Destroy */}
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               onClick={handleInit}
@@ -472,6 +510,18 @@ export const InfrastructureDeployment: React.FC = () => {
               className="p-1.5 rounded-md text-xs font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800 disabled:opacity-50 transition-colors"
             >
               <RefreshCw className="h-3.5 w-3.5" />
+            </button>
+
+            {/* Explicit Destroy Button (Differentiated Styling) */}
+            <div className="h-4 w-px bg-slate-200 mx-1 hidden sm:block" />
+            <button
+              onClick={() => setShowDestroyModal(true)}
+              disabled={isBusy}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 hover:border-rose-300 disabled:opacity-50 transition-colors shadow-2xs"
+              title="Explicit Terraform Destroy (Requires Confirmation)"
+            >
+              <Trash2 className="h-3.5 w-3.5 text-rose-600" />
+              <span>Destroy Infrastructure</span>
             </button>
           </div>
         </div>
@@ -808,6 +858,78 @@ export const InfrastructureDeployment: React.FC = () => {
                   className="px-5 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-200 transition-all active:scale-98"
                 >
                   YES, APPLY
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Explicit Destroy Confirmation Modal */}
+      <AnimatePresence>
+        {showDestroyModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white rounded-2xl border border-rose-200 shadow-2xl max-w-lg w-full p-6 space-y-5"
+            >
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 rounded-xl bg-rose-100 border border-rose-200 text-rose-600">
+                  <AlertTriangle className="h-6 w-6 text-rose-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">
+                    Destroy AWS Infrastructure?
+                  </h3>
+                  <p className="text-xs text-rose-600 font-medium">
+                    Warning: This action is destructive and irreversible.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-rose-50/60 rounded-xl p-4 border border-rose-200 text-xs space-y-3">
+                <p className="text-slate-700 leading-relaxed font-medium">
+                  This will execute{' '}
+                  <code className="bg-rose-100 text-rose-800 px-1 py-0.5 rounded font-mono font-bold">
+                    terraform destroy -auto-approve
+                  </code>{' '}
+                  against your AWS environment (<span className="font-semibold">ap-south-1</span>).
+                </p>
+
+                <p className="text-slate-600">The following cloud resources will be completely torn down:</p>
+                <ul className="list-disc list-inside text-slate-700 space-y-1 font-mono text-[11px] bg-white p-3 rounded-lg border border-rose-100">
+                  <li>DynamoDB Table: JobsTable</li>
+                  <li>Amazon SQS: Primary Queue & DLQ</li>
+                  <li>AWS Lambda: Producer & Worker Functions</li>
+                  <li>Amazon API Gateway: HTTP API & Stage</li>
+                  <li>Amazon S3: Artifacts Bucket</li>
+                </ul>
+
+                <p className="text-[11px] text-slate-500 font-medium">
+                  Are you sure you want to permanently destroy this infrastructure?
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end space-x-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDestroyModal(false);
+                    addLog('info', 'Destruction cancelled by user. Terraform destroy was NOT executed.');
+                  }}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  CANCEL
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDestroy}
+                  className="px-5 py-2 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-sm shadow-rose-200 transition-all active:scale-98 flex items-center space-x-1.5"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>YES, DESTROY INFRASTRUCTURE</span>
                 </button>
               </div>
             </motion.div>

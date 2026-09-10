@@ -28,6 +28,7 @@ export const createApp = () => {
         terraformValidate: 'POST /api/terraform/validate',
         terraformPlan: 'POST /api/terraform/plan',
         terraformApply: 'POST /api/terraform/apply',
+        terraformDestroy: 'POST /api/terraform/destroy',
         terraformOutputs: 'GET /api/terraform/outputs',
       },
       timestamp: new Date().toISOString(),

@@ -64,6 +64,17 @@ apiRouter.post('/terraform/apply', async (_req: Request, res: Response) => {
   }
 });
 
+// POST /api/terraform/destroy
+apiRouter.post('/terraform/destroy', async (_req: Request, res: Response) => {
+  try {
+    const result = await globalTerraformService.destroy();
+    res.json(result);
+  } catch (error: any) {
+    const status = error.message?.includes('Another Terraform operation') ? 409 : 500;
+    res.status(status).json({ error: error.message, success: false });
+  }
+});
+
 // GET /api/terraform/outputs
 apiRouter.get('/terraform/outputs', async (_req: Request, res: Response) => {
   try {

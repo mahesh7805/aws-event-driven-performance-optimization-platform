@@ -182,6 +182,11 @@ export async function runTerraformApply(): Promise<TerraformCommandResult> {
   return res.json();
 }
 
+export async function runTerraformDestroy(): Promise<TerraformCommandResult> {
+  const res = await fetch('/api/terraform/destroy', { method: 'POST' });
+  return res.json();
+}
+
 export async function getTerraformOutputs(): Promise<TerraformCommandResult> {
   const res = await fetch('/api/terraform/outputs');
   return res.json();

@@ -203,6 +203,8 @@ export class TerraformService {
           summary = planDetails?.summaryText;
         } else if (commandName === 'apply' && success) {
           summary = 'Apply complete! Resources successfully provisioned.';
+        } else if (commandName === 'destroy' && success) {
+          summary = 'Destroy complete! All infrastructure resources have been torn down.';
         } else if (commandName === 'validate' && success) {
           summary = 'Success! The configuration is valid.';
         } else if (commandName === 'init' && success) {
@@ -245,6 +247,14 @@ export class TerraformService {
       } catch {
         // Output retrieval failure is non-fatal to apply result
       }
+    }
+    return result;
+  }
+
+  public async destroy(): Promise<TerraformCommandResult> {
+    const result = await this.executeCommand('destroy', ['destroy', '-auto-approve', '-no-color']);
+    if (result.success) {
+      result.outputs = {};
     }
     return result;
   }
