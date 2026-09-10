@@ -121,3 +121,68 @@ export async function simulateFailure(scenario: string): Promise<FailureSimulati
   if (!res.ok) throw new Error(`Failure simulation failed (${res.status})`);
   return res.json();
 }
+
+export interface TerraformPlanDetails {
+  add: number;
+  change: number;
+  destroy: number;
+  noChanges: boolean;
+  summaryText: string;
+}
+
+export interface TerraformCommandResult {
+  command: string;
+  success: boolean;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  summary?: string;
+  planDetails?: TerraformPlanDetails;
+  outputs?: Record<string, any>;
+  timestamp: string;
+  error?: string;
+}
+
+export interface TerraformStatus {
+  isBusy: boolean;
+  currentOperation: string | null;
+  terraformDir: string;
+  lastRun?: {
+    command: string;
+    success: boolean;
+    timestamp: string;
+    durationMs: number;
+  };
+}
+
+export async function getTerraformStatus(): Promise<TerraformStatus> {
+  const res = await fetch('/api/terraform/status');
+  if (!res.ok) throw new Error(`Failed to fetch terraform status (${res.status})`);
+  return res.json();
+}
+
+export async function runTerraformInit(): Promise<TerraformCommandResult> {
+  const res = await fetch('/api/terraform/init', { method: 'POST' });
+  return res.json();
+}
+
+export async function runTerraformValidate(): Promise<TerraformCommandResult> {
+  const res = await fetch('/api/terraform/validate', { method: 'POST' });
+  return res.json();
+}
+
+export async function runTerraformPlan(): Promise<TerraformCommandResult> {
+  const res = await fetch('/api/terraform/plan', { method: 'POST' });
+  return res.json();
+}
+
+export async function runTerraformApply(): Promise<TerraformCommandResult> {
+  const res = await fetch('/api/terraform/apply', { method: 'POST' });
+  return res.json();
+}
+
+export async function getTerraformOutputs(): Promise<TerraformCommandResult> {
+  const res = await fetch('/api/terraform/outputs');
+  return res.json();
+}

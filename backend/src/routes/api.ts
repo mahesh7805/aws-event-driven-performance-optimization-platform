@@ -5,6 +5,7 @@ import { ParallelProcessor } from '../services/parallelProcessor.js';
 import { CacheService } from '../services/cacheService.js';
 import { BenchmarkEngine } from '../services/benchmarkEngine.js';
 import { FailureLabService } from '../services/failureLab.js';
+import { globalTerraformService } from '../services/terraformService.js';
 
 export const apiRouter = Router();
 
@@ -13,6 +14,66 @@ const parallelProcessor = new ParallelProcessor(globalRepository);
 const cacheService = new CacheService(globalRepository, 60);
 const benchmarkEngine = new BenchmarkEngine(globalRepository);
 const failureLabService = new FailureLabService(globalRepository);
+
+// GET /api/terraform/status
+apiRouter.get('/terraform/status', (_req: Request, res: Response) => {
+  res.json(globalTerraformService.getStatus());
+});
+
+// POST /api/terraform/init
+apiRouter.post('/terraform/init', async (_req: Request, res: Response) => {
+  try {
+    const result = await globalTerraformService.init();
+    res.json(result);
+  } catch (error: any) {
+    const status = error.message?.includes('Another Terraform operation') ? 409 : 500;
+    res.status(status).json({ error: error.message, success: false });
+  }
+});
+
+// POST /api/terraform/validate
+apiRouter.post('/terraform/validate', async (_req: Request, res: Response) => {
+  try {
+    const result = await globalTerraformService.validate();
+    res.json(result);
+  } catch (error: any) {
+    const status = error.message?.includes('Another Terraform operation') ? 409 : 500;
+    res.status(status).json({ error: error.message, success: false });
+  }
+});
+
+// POST /api/terraform/plan
+apiRouter.post('/terraform/plan', async (_req: Request, res: Response) => {
+  try {
+    const result = await globalTerraformService.plan();
+    res.json(result);
+  } catch (error: any) {
+    const status = error.message?.includes('Another Terraform operation') ? 409 : 500;
+    res.status(status).json({ error: error.message, success: false });
+  }
+});
+
+// POST /api/terraform/apply
+apiRouter.post('/terraform/apply', async (_req: Request, res: Response) => {
+  try {
+    const result = await globalTerraformService.apply();
+    res.json(result);
+  } catch (error: any) {
+    const status = error.message?.includes('Another Terraform operation') ? 409 : 500;
+    res.status(status).json({ error: error.message, success: false });
+  }
+});
+
+// GET /api/terraform/outputs
+apiRouter.get('/terraform/outputs', async (_req: Request, res: Response) => {
+  try {
+    const result = await globalTerraformService.getOutputs();
+    res.json(result);
+  } catch (error: any) {
+    const status = error.message?.includes('Another Terraform operation') ? 409 : 500;
+    res.status(status).json({ error: error.message, success: false });
+  }
+});
 
 // POST /api/batches/serial
 apiRouter.post('/batches/serial', async (req: Request, res: Response) => {

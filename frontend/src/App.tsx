@@ -10,6 +10,7 @@ import { ObservabilityDashboard } from './components/ObservabilityDashboard';
 import { FailureLab } from './components/FailureLab';
 import { CloudMigrationDemo } from './components/CloudMigrationDemo';
 import { InterviewMode } from './components/InterviewMode';
+import { InfrastructureDeployment } from './components/InfrastructureDeployment';
 import { BenchmarkResponse } from './services/apiClient';
 
 export function App() {
@@ -28,6 +29,8 @@ export function App() {
             <BenchmarkLab onBenchmarkComplete={setLatestMetrics} />
           </>
         )}
+
+        {activeTab === 'infrastructure' && <InfrastructureDeployment />}
 
         {activeTab === 'benchmark' && (
           <BenchmarkLab onBenchmarkComplete={setLatestMetrics} />

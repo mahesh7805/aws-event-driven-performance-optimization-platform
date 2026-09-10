@@ -113,4 +113,23 @@ describe('Layer 6 & 7 - REST API & Benchmark Integration Tests', () => {
     expect(data.scenario).toBe('worker-failure');
     expect(data.status).toBe('RECOVERED_VIA_RETRY');
   });
+
+  it('GET /api/terraform/status should return terraform service status', async () => {
+    const res = await fetch(`${BASE_URL}/terraform/status`);
+    const data = await res.json();
+    expect(res.status).toBe(200);
+    expect(data.isBusy).toBe(false);
+    expect(data.terraformDir).toBeDefined();
+  });
+
+  it('POST /api/terraform/validate should validate infrastructure successfully', async () => {
+    const res = await fetch(`${BASE_URL}/terraform/validate`, {
+      method: 'POST',
+    });
+    const data = await res.json();
+    expect(res.status).toBe(200);
+    expect(data.success).toBe(true);
+    expect(data.command).toBe('terraform validate -no-color');
+    expect(data.exitCode).toBe(0);
+  });
 });

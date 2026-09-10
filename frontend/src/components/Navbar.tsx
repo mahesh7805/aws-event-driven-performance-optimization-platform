@@ -9,10 +9,12 @@ import {
   Cloud,
   HelpCircle,
   Zap,
+  Terminal,
 } from 'lucide-react';
 
 export type TabId =
   | 'dashboard'
+  | 'infrastructure'
   | 'benchmark'
   | 'queue'
   | 'cache'
@@ -30,6 +32,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
   const navItems: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'dashboard', label: 'Overview', icon: Activity },
+    { id: 'infrastructure', label: 'Infrastructure', icon: Terminal },
     { id: 'benchmark', label: 'Benchmark Lab', icon: Zap },
     { id: 'queue', label: 'Live Queue', icon: Cpu },
     { id: 'cache', label: 'Cache Observatory', icon: Database },

@@ -23,6 +23,12 @@ export const createApp = () => {
         getJob: 'GET /api/jobs/:jobId',
         cacheStats: 'GET /api/cache/stats',
         simulateFailure: 'POST /api/failure-lab/simulate',
+        terraformStatus: 'GET /api/terraform/status',
+        terraformInit: 'POST /api/terraform/init',
+        terraformValidate: 'POST /api/terraform/validate',
+        terraformPlan: 'POST /api/terraform/plan',
+        terraformApply: 'POST /api/terraform/apply',
+        terraformOutputs: 'GET /api/terraform/outputs',
       },
       timestamp: new Date().toISOString(),
     });
