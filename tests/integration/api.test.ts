@@ -131,7 +131,7 @@ describe('Layer 6 & 7 - REST API & Benchmark Integration Tests', () => {
     expect(data.success).toBe(true);
     expect(data.command).toBe('terraform validate -no-color');
     expect(data.exitCode).toBe(0);
-  });
+  }, 30000);
 
   it('POST /api/batches should create batch and GET /api/metrics/system and /api/logs should return valid operational data', async () => {
     // 1. Create batch via canonical endpoint

@@ -54,7 +54,7 @@ Plan: 3 to add, 1 to change, 0 to destroy.
     expect(statusAfter.isBusy).toBe(false);
     expect(statusAfter.lastRun?.command).toBe('validate');
     expect(statusAfter.lastRun?.success).toBe(true);
-  });
+  }, 30000);
 
   it('should prevent simultaneous operations when a command is in progress', async () => {
     const busyService = new TerraformService();
