@@ -16,20 +16,14 @@ import {
   Radio,
   Maximize2,
   Minimize2,
-  FlaskConical,
-  Gauge,
-  Timer,
-  TrendingUp,
 } from 'lucide-react';
 import {
   runParallelBatch,
   getBatchDetails,
   getCloudSyncStatus,
   getAllBatches,
-  getLambdaConcurrencyMetrics,
   CloudSyncStatus,
   BatchRecord,
-  LambdaConcurrencyMetrics,
 } from '../services/apiClient';
 
 interface QueueJobItem {
@@ -56,12 +50,6 @@ export const LiveQueueVisualizer: React.FC = () => {
   const [inspectingBatchId, setInspectingBatchId] = useState<string | null>(null);
   const [isCompletedExpanded, setIsCompletedExpanded] = useState<boolean>(false);
 
-  // Temporary Diagnostic Concurrency Metrics state
-  const [cwConcurrency, setCwConcurrency] = useState<LambdaConcurrencyMetrics | null>(null);
-  const [peakObservedConcurrency, setPeakObservedConcurrency] = useState<number>(0);
-  const [isLoadingCwMetrics, setIsLoadingCwMetrics] = useState<boolean>(false);
-  const [showDatapointsTable, setShowDatapointsTable] = useState<boolean>(false);
-
   const fetchSyncStatus = async () => {
     try {
       const status = await getCloudSyncStatus();
@@ -85,23 +73,10 @@ export const LiveQueueVisualizer: React.FC = () => {
     }
   };
 
-  const fetchCwConcurrency = async () => {
-    setIsLoadingCwMetrics(true);
-    try {
-      const data = await getLambdaConcurrencyMetrics();
-      setCwConcurrency(data);
-    } catch (err) {
-      console.warn('Could not fetch CloudWatch metrics', err);
-    } finally {
-      setIsLoadingCwMetrics(false);
-    }
-  };
-
   // Initial load and real-time syncing interval (every 3s)
   useEffect(() => {
     fetchSyncStatus();
     fetchBatches();
-    fetchCwConcurrency();
 
     const intervalId = setInterval(() => {
       fetchBatches();
@@ -110,15 +85,13 @@ export const LiveQueueVisualizer: React.FC = () => {
     return () => clearInterval(intervalId);
   }, []);
 
-  const startLiveSimulation = async (customCount?: number) => {
-    const count = customCount ?? selectedJobCount;
-    setPeakObservedConcurrency(0);
+  const startLiveSimulation = async () => {
     setRunning(true);
     setJobs([]);
 
     try {
       // 1. Trigger backend Parallel Execution for selected job count
-      const res = await runParallelBatch(count, 40);
+      const res = await runParallelBatch(selectedJobCount, 40);
       setBatchId(res.batch.batchId);
       setInspectingBatchId(res.batch.batchId);
 
@@ -151,7 +124,6 @@ export const LiveQueueVisualizer: React.FC = () => {
               setRunning(false);
               // Refresh batch registry immediately upon completion
               fetchBatches();
-              setTimeout(() => fetchCwConcurrency(), 2500);
             }
           }
         } catch {
@@ -195,12 +167,6 @@ export const LiveQueueVisualizer: React.FC = () => {
   const processing = jobs.filter((j) => j.status === 'PROCESSING');
   const completed = jobs.filter((j) => j.status === 'COMPLETED');
   const failed = jobs.filter((j) => j.status === 'FAILED');
-
-  useEffect(() => {
-    if (processing.length > peakObservedConcurrency) {
-      setPeakObservedConcurrency(processing.length);
-    }
-  }, [processing.length, peakObservedConcurrency]);
 
   return (
     <div className="space-y-6">
@@ -268,7 +234,7 @@ export const LiveQueueVisualizer: React.FC = () => {
 
             {/* Submit Jobs Button */}
             <button
-              onClick={() => startLiveSimulation()}
+              onClick={startLiveSimulation}
               disabled={running}
               className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-xs font-medium shadow-sm transition-all cursor-pointer"
             >
@@ -345,165 +311,6 @@ export const LiveQueueVisualizer: React.FC = () => {
               {lastSyncedAt ? `Synced ${lastSyncedAt.toLocaleTimeString()}` : 'Connecting...'}
             </div>
           </div>
-        </div>
-
-        {/* TEMPORARY DIAGNOSTIC: Lambda Concurrency Scaling Test Observatory */}
-        <div className="bg-gradient-to-r from-amber-500/10 via-indigo-500/10 to-purple-500/10 border-2 border-amber-400/60 rounded-2xl p-5 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-200/60 pb-3">
-            <div className="flex items-start sm:items-center space-x-3">
-              <div className="p-2 bg-amber-100 text-amber-800 rounded-xl">
-                <FlaskConical className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-1.5">
-                    <span>Temporary Diagnostic: Lambda Concurrency Scaling Test</span>
-                  </h3>
-                  <span className="text-[10px] bg-amber-200 text-amber-950 font-mono font-bold px-2 py-0.5 rounded-full border border-amber-300">
-                    Target: 10 Lambdas
-                  </span>
-                  <span className="text-[10px] bg-emerald-100 text-emerald-800 font-mono font-bold px-2 py-0.5 rounded-full border border-emerald-300">
-                    ⚡ 3,000 ms Invocation Delay Active
-                  </span>
-                </div>
-                <p className="text-xs text-slate-600 mt-0.5">
-                  Testing whether SQS &rarr; Lambda parallel processing reaches configured Lambda Reserved Concurrency of 10.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-2 shrink-0">
-              <button
-                onClick={() => startLiveSimulation(50)}
-                disabled={running}
-                className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50"
-              >
-                <Zap className="h-3.5 w-3.5" />
-                <span>Test 50 Jobs (10 Concurrency)</span>
-              </button>
-
-              <button
-                onClick={fetchCwConcurrency}
-                disabled={isLoadingCwMetrics}
-                title="Refresh live CloudWatch metrics from AWS"
-                className="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors cursor-pointer"
-              >
-                <RefreshCw className={`h-4 w-4 ${isLoadingCwMetrics ? 'animate-spin text-indigo-600' : ''}`} />
-              </button>
-            </div>
-          </div>
-
-          {/* 4 Concurrency Metric Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {/* Metric 1: Live Active Workers */}
-            <div className="bg-white/95 p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
-              <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
-                <span>Active Concurrency</span>
-                <span className={`h-2 w-2 rounded-full ${processing.length > 0 ? 'bg-sky-500 animate-ping' : 'bg-slate-300'}`} />
-              </div>
-              <div className="mt-1 flex items-baseline space-x-1">
-                <span className="text-3xl font-black font-mono text-sky-700">{processing.length}</span>
-                <span className="text-xs text-slate-400 font-mono font-medium">/ 10 Max</span>
-              </div>
-              <div className="text-[10px] text-slate-500 mt-0.5">
-                Current active Lambda workers
-              </div>
-            </div>
-
-            {/* Metric 2: Peak Concurrency In Test */}
-            <div className="bg-white/95 p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
-              <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
-                <span>Peak In Current Test</span>
-                <Gauge className="h-4 w-4 text-indigo-500" />
-              </div>
-              <div className="mt-1 flex items-baseline space-x-1">
-                <span className="text-3xl font-black font-mono text-indigo-700">{peakObservedConcurrency}</span>
-                <span className="text-xs text-slate-400 font-mono font-medium">/ 10 Max</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-1.5 mt-1.5 overflow-hidden">
-                <div
-                  className="bg-indigo-600 h-1.5 rounded-full transition-all duration-300"
-                  style={{ width: `${Math.min(100, peakObservedConcurrency * 10)}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Metric 3: CloudWatch Peak Concurrency */}
-            <div className="bg-white/95 p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
-              <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
-                <span>CloudWatch Peak</span>
-                <TrendingUp className="h-4 w-4 text-emerald-600" />
-              </div>
-              <div className="mt-1 flex items-baseline space-x-1">
-                <span className="text-3xl font-black font-mono text-emerald-700">
-                  {cwConcurrency ? cwConcurrency.peakMaximum : '—'}
-                </span>
-                <span className="text-xs text-slate-400 font-mono font-medium">/ 10</span>
-              </div>
-              <div className="text-[10px] text-slate-500 mt-0.5 truncate">
-                AWS Telemetry: ConcurrentExecutions
-              </div>
-            </div>
-
-            {/* Metric 4: Diagnostic Delay Duration */}
-            <div className="bg-white/95 p-3.5 rounded-xl border border-slate-200/80 shadow-2xs">
-              <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
-                <span>Invocation Delay</span>
-                <Timer className="h-4 w-4 text-amber-500" />
-              </div>
-              <div className="mt-1 flex items-baseline space-x-1">
-                <span className="text-2xl font-black font-mono text-amber-700">3,000</span>
-                <span className="text-xs text-slate-400 font-mono font-medium">ms</span>
-              </div>
-              <div className="text-[10px] text-emerald-600 font-semibold mt-0.5">
-                ✓ Deployed on AWS Lambda
-              </div>
-            </div>
-          </div>
-
-          {/* CloudWatch Telemetry Datapoints collapsible toggle */}
-          {cwConcurrency && cwConcurrency.datapoints && cwConcurrency.datapoints.length > 0 && (
-            <div className="pt-2 border-t border-amber-200/60">
-              <div className="flex items-center justify-between">
-                <button
-                  onClick={() => setShowDatapointsTable(!showDatapointsTable)}
-                  className="text-xs text-indigo-700 hover:text-indigo-900 font-medium flex items-center space-x-1 cursor-pointer"
-                >
-                  <span>{showDatapointsTable ? '▾ Hide' : '▸ View'} AWS CloudWatch ConcurrentExecutions Datapoints ({cwConcurrency.datapoints.length} records)</span>
-                </button>
-                <span className="text-[10px] text-slate-500 font-mono">
-                  Function: {cwConcurrency.functionName} ({cwConcurrency.region})
-                </span>
-              </div>
-
-              {showDatapointsTable && (
-                <div className="mt-2.5 overflow-x-auto border border-slate-200 rounded-lg bg-white">
-                  <table className="w-full text-left text-xs font-mono">
-                    <thead className="bg-slate-50 text-[11px] text-slate-600 border-b border-slate-200 font-sans">
-                      <tr>
-                        <th className="py-2 px-3">Timestamp</th>
-                        <th className="py-2 px-3 text-center">Maximum Concurrent</th>
-                        <th className="py-2 px-3 text-center">Average Concurrent</th>
-                        <th className="py-2 px-3 text-right">Target Saturation</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {cwConcurrency.datapoints.slice(0, 6).map((dp, i) => (
-                        <tr key={i} className="hover:bg-slate-50/80">
-                          <td className="py-1.5 px-3 text-slate-700">{dp.timestamp}</td>
-                          <td className="py-1.5 px-3 text-center font-bold text-indigo-600">{dp.maximum}</td>
-                          <td className="py-1.5 px-3 text-center text-slate-600">{dp.average}</td>
-                          <td className="py-1.5 px-3 text-right text-emerald-700 font-semibold">
-                            {Math.round((dp.maximum / 10) * 100)}%
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Active/Inspected Batch Banner */}
