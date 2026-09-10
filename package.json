@@ -13,6 +13,7 @@
     "dev:frontend": "npm run dev --workspace=frontend",
     "dev:backend": "npm run dev --workspace=backend",
     "build": "npm run build --workspaces",
+    "bundle:lambdas": "npm run bundle --workspace=lambdas",
     "typecheck": "npm run typecheck --workspaces",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.10.0",
+    "esbuild": "^0.28.2",
     "eslint": "^9.10.0",
     "prettier": "^3.3.3",
     "typescript": "^5.5.4",

@@ -106,27 +106,15 @@ resource "aws_iam_role_policy" "lambda_policy" {
   })
 }
 
-# --- Dummy ZIP Archive for Initial Lambda Deployment ---
-
-data "archive_file" "dummy_lambda_zip" {
-  type        = "zip"
-  output_path = "${path.module}/dummy_lambda.zip"
-
-  source {
-    content  = "exports.handler = async () => ({ statusCode: 200, body: 'OK' });"
-    filename = "index.js"
-  }
-}
-
 # --- Lambda Functions ---
 
 resource "aws_lambda_function" "producer" {
   function_name    = "${var.project_name}-producer-${var.environment}"
   role             = aws_iam_role.lambda_exec.arn
-  handler          = "producer.handler"
+  handler          = "producer-bundle.handler"
   runtime          = "nodejs20.x"
-  filename         = data.archive_file.dummy_lambda_zip.output_path
-  source_code_hash = data.archive_file.dummy_lambda_zip.output_base64sha256
+  filename         = "${path.module}/../../../lambdas/producer.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../../lambdas/producer.zip")
   timeout          = 30
 
   environment {
@@ -138,14 +126,14 @@ resource "aws_lambda_function" "producer" {
 }
 
 resource "aws_lambda_function" "worker" {
-  function_name                  = "${var.project_name}-worker-${var.environment}"
-  role                           = aws_iam_role.lambda_exec.arn
-  handler                        = "worker.handler"
-  runtime                        = "nodejs20.x"
-  filename                       = data.archive_file.dummy_lambda_zip.output_path
-  source_code_hash               = data.archive_file.dummy_lambda_zip.output_base64sha256
-  timeout                        = 30
-  reserved_concurrent_executions = 50
+  function_name    = "${var.project_name}-worker-${var.environment}"
+  role             = aws_iam_role.lambda_exec.arn
+  handler          = "worker-bundle.handler"
+  runtime          = "nodejs20.x"
+  filename         = "${path.module}/../../../lambdas/worker.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../../lambdas/worker.zip")
+  timeout          = 30
+
 
   environment {
     variables = {

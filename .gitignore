@@ -43,3 +43,12 @@ coverage/
 
 # OS metadata
 Thumbs.db
+
+# Lambda Bundles
+lambdas/*-bundle.js
+
+# Scratch & Temporary CLI files
+services.txt
+delete-key.json
+values.json
+dummy_lambda.zip

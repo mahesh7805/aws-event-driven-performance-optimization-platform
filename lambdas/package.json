@@ -5,6 +5,7 @@
   "main": "dist/producer.js",
   "scripts": {
     "build": "tsc",
+    "bundle": "esbuild src/producer.ts --bundle --platform=node --target=node20 --outfile=producer-bundle.js && esbuild src/worker.ts --bundle --platform=node --target=node20 --outfile=worker-bundle.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

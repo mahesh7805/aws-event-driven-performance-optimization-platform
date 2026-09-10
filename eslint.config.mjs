@@ -5,7 +5,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/.vite/**'],
+    ignores: ['**/dist/**', '**/node_modules/**', '**/.vite/**', 'lambdas/*-bundle.js', 'lambdas/*.js'],
   },
   {
     rules: {
