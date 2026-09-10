@@ -1,205 +1,337 @@
 # AWS Event-Driven Performance Optimization Platform
 
-A enterprise-grade full-stack platform and AWS serverless reference architecture designed to demonstrate how serial batch workloads can be optimized using **Parallel Processing (SQS + Lambda)**, **In-Memory Caching (Redis/ElastiCache)**, and **DynamoDB**.
+[![CI/CD Pipeline](https://github.com/mahesh7805/aws-event-driven-performance-optimization-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/mahesh7805/aws-event-driven-performance-optimization-platform/actions/workflows/ci.yml)
+![Node.js](https://img.shields.io/badge/Node.js-20.x%20LTS-green)
+![Terraform](https://img.shields.io/badge/Terraform-1.5%2B-purple)
+![AWS](https://img.shields.io/badge/AWS-Serverless-orange)
+![License](https://img.shields.io/badge/License-MIT-blue)
+
+## Project Overview
+
+I developed an AWS-based serverless, event-driven job-processing platform designed to solve the performance and scalability problems associated with serial processing of independent workloads. The primary objective of the project is to replace a sequential job-processing model with an asynchronous, queue-based architecture capable of processing multiple jobs concurrently.
+
+The platform provides a frontend dashboard where users can generate and monitor jobs. The application uses Amazon API Gateway, AWS Lambda, Amazon SQS, and Amazon DynamoDB to create a decoupled processing pipeline. Terraform is used as Infrastructure as Code to provision and manage the AWS infrastructure, while an application-level TTL cache reduces repeated database reads for frequently accessed job information.
 
 ---
 
-## Technical Stack & Architecture
+## Problem Statement
 
-- **Frontend**: React 18, TypeScript, Vite, Tailwind CSS, Framer Motion, Three.js / React Three Fiber, Recharts.
-- **Backend**: Node.js, Express REST API, TypeScript, Vitest.
-- **AWS Infrastructure**: API Gateway, AWS Lambda, Amazon SQS + DLQ, DynamoDB, S3, IAM, CloudWatch.
-- **Infrastructure as Code**: Terraform (`/infrastructure`).
-- **Caching**: Redis-compatible in-memory store with TTL.
+In a traditional serial processing architecture, if a system receives 100 independent jobs, it processes them one after another:
 
----
-
-## 1. Project Overview
-The platform visually and quantitatively demonstrates how replacing a legacy synchronous processing loop with an asynchronous, event-driven serverless architecture reduces latency by **88%+** while increasing throughput from 5 to 50+ jobs/second.
-
----
-
-## 2. Problem Statement
-Many legacy applications process independent batch items sequentially inside a single-threaded process loop (`Job 1 → Job 2 → ... → Job N`). For a batch of 20 jobs where each item requires 200ms of CPU compute or I/O, total runtime is $20 \times 200\text{ms} = 4.0\text{ seconds}$. As batch size increases to 100 items, execution time degrades to 20 seconds, causing client timeouts and severe database contention.
-
----
-
-## 3. System Architecture
-
-```
-[ Client / Dashboard (React + R3F) ]
-                │
-                ▼ HTTP REST API
-        [ API Gateway / Express API ]
-                │
-     ┌──────────┴──────────┐
-     ▼                     ▼
-[ In-Memory / Redis Cache ]  [ SQS Queue ]
-  (Hit/Miss Read-Through)       │
-                           ▼
-                 [ Lambda Worker Pool ]
-                           │
-                           ▼
-                  [ Amazon DynamoDB ]
+```text
+Job 1 → Job 2 → Job 3 → Job 4 → ... → Job 100
 ```
 
----
+For a batch of 100 jobs where each item requires 150–200ms of compute or I/O, total runtime reaches **15 to 20 seconds**, causing client timeouts, single-thread bottlenecks, and database contention.
 
-## 4. Why Serial Processing Was Slow
-Serial processing executes tasks strictly sequentially on a single thread. Total runtime grows linearly as $O(N)$ with batch size. The CPU spends significant time idling during network/disk I/O wait states between steps.
+The goal of this project is to create a system where jobs can be submitted quickly, buffered safely, and processed independently and concurrently:
 
----
-
-## 5. Why Parallel Processing Improved It
-By breaking batch jobs into independent messages, multiple workers execute concurrently in parallel across isolated container instances. Total runtime drops to $O(1)$ constant time: $T_{\text{total}} \approx \max(t_{\text{job}}) + t_{\text{overhead}}$.
-
----
-
-## 6. Why SQS Was Used
-Amazon SQS decouples message producers (API Gateway/Producer Lambda) from consumer workers. It acts as a high-throughput buffer that flattens traffic spikes, protects downstream databases from sudden overload, and guarantees message persistence.
-
----
-
-## 7. Why Lambda Was Used
-AWS Lambda provides event-driven serverless compute that auto-scales horizontally from 0 to 1,000+ concurrent worker instances within milliseconds based on SQS queue depth, incurring zero cost when idle.
-
----
-
-## 8. Why DynamoDB Was Used
-Amazon DynamoDB delivers single-digit millisecond read/write latency at any scale. Its on-demand capacity mode handles burst write throughput from concurrent Lambda workers without schema locks or connection pool limits.
+```text
+User
+ ↓
+Frontend
+ ↓
+API Gateway
+ ↓
+Producer Lambda
+ ↓
+Amazon SQS
+ ↓
+Lambda Workers
+ ↓
+DynamoDB
+```
 
 ---
 
-## 9. Why Caching Was Used
-Redis caching intercepts frequent read queries before hitting DynamoDB, returning results in ~2ms (compared to ~20ms for database queries) and reducing DynamoDB Read Capacity Units (RCU) by over 80%.
+## Architecture
+
+```text
+                    ┌──────────────────────┐
+                    │       Frontend       │
+                    │   Job Dashboard      │
+                    └──────────┬───────────┘
+                               │
+                               │ HTTP
+                               ▼
+                    ┌──────────────────────┐
+                    │     API Gateway      │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │   Producer Lambda    │
+                    │   Job Submission     │
+                    └──────────┬───────────┘
+                               │
+                               │ Send Messages (Batch Chunks)
+                               ▼
+                    ┌──────────────────────┐
+                    │     Amazon SQS       │
+                    │      Job Queue       │
+                    └──────────┬───────────┘
+                               │
+                     Event Source Mapping
+                               │
+                 ┌─────────────┼─────────────┐
+                 ▼             ▼             ▼
+          ┌────────────┐ ┌────────────┐ ┌────────────┐
+          │   Lambda   │ │   Lambda   │ │   Lambda   │
+          │   Worker   │ │   Worker   │ │   Worker   │
+          └──────┬─────┘ └──────┬─────┘ └──────┬─────┘
+                 │              │              │
+                 └──────────────┼──────────────┘
+                                ▼
+                       ┌──────────────────┐
+                       │    DynamoDB      │
+                       │    JobsTable     │
+                       └──────────────────┘
+```
+
+The architecture separates job submission from job processing. This allows the producer to quickly submit jobs to SQS while workers independently consume and process them.
 
 ---
 
-## 10. Time-To-Live (TTL)
-TTL (`CACHE_TTL_SECONDS=60`) automatically evicts cached items after a configurable period, ensuring that stale job records are purged and fresh state is re-fetched from DynamoDB.
+## End-to-End Workflow
+
+### 1. Job Creation
+
+The user opens the frontend dashboard and chooses the number of jobs to create, for example:
+
+```text
+Create 100 Jobs
+```
+
+The frontend sends the request to the backend/API layer. The request reaches API Gateway and is forwarded to the producer Lambda.
 
 ---
 
-## 11. Cache Hit vs Cache Miss
-- **Cache Hit**: Data is found in Redis memory and returned immediately (0 DB reads).
-- **Cache Miss**: Data is absent from cache; the system queries DynamoDB, writes the item to Redis with TTL, and returns it (1 DB read).
+### 2. Producer Lambda
+
+The producer Lambda accepts the job request and publishes jobs to Amazon SQS. Instead of processing the jobs itself, it creates messages such as:
+
+```text
+Job 001
+Job 002
+Job 003
+...
+Job 100
+```
+
+and sends them to the SQS queue in batches (chunks of up to 10 messages per AWS SQS API call). This completely decouples ingestion from heavy processing.
 
 ---
 
-## 12. Idempotency
-SQS standard queues guarantee at-least-once delivery, which can result in duplicate message processing. Workers enforce idempotency using the unique `jobId` as an idempotency key to prevent duplicate writes or side-effects.
+### 3. Amazon SQS
+
+Amazon SQS acts as the asynchronous messaging layer and workload buffer:
+
+```text
+Producer Lambda → Amazon SQS → Lambda Workers
+```
+
+- **Absorption of Spikes**: The queue absorbs traffic surges without requiring the client or producer to block.
+- **Message Durability**: In-flight messages are protected with visibility timeouts (30s) and retry policies.
+- **Dead Letter Queue (DLQ)**: Poison pills or repeatedly failing messages are isolated into a DLQ (`aws-event-driven-dlq`) without halting the pipeline.
 
 ---
 
-## 13. Dead Letter Queue (DLQ)
-Messages that fail repeatedly (exceeding `maxReceiveCount=3`) are automatically moved to an SQS Dead Letter Queue (`aws-event-driven-dlq`) for isolation, alerting, and manual debugging without blocking the primary queue.
+### 4. Lambda Worker Processing
+
+The worker Lambda is connected to SQS via native **Event Source Mapping**.
+
+When messages become available, Lambda retrieves them and invokes concurrent worker instances:
+
+```text
+                    SQS
+                     │
+          ┌──────────┼──────────┐
+          ▼          ▼          ▼
+       Worker 1   Worker 2   Worker 3
+          │          │          │
+       Job 1-10   Job 11-20  Job 21-30
+```
+
+- **Parallel Scaling**: Lambda scales out dynamically to process independent records concurrently.
+- **Idempotency**: Workers use the unique `jobId` to guarantee idempotent execution, preventing duplicate side-effects.
 
 ---
 
-## 14. Retry Behavior & Visibility Timeout
-When a Lambda worker fails or times out, the SQS message visibility timeout (30 seconds) expires, placing the message back into the queue for another worker to retry automatically.
+## DynamoDB
+
+Amazon DynamoDB serves as the persistent data store for job information:
+
+```text
+JobsTable Schema:
+- jobId (String, Partition Key)
+- batchId (String)
+- status (String: pending | processing | completed | failed)
+- payload (Map)
+- result (Map)
+- executionTimeMs (Number)
+- createdAt (String / Timestamp)
+- updatedAt (String / Timestamp)
+```
+
+- **Durability**: Job states persist permanently even after Lambda instances terminate.
+- **Pay-Per-Request (On-Demand)**: DynamoDB scales instantly with burst writes from concurrent Lambda workers with zero capacity management overhead.
 
 ---
 
-## 15. Lambda Concurrency
-Reserved concurrency caps the maximum number of simultaneous Lambda worker instances (e.g. 50 workers) to prevent exhausting downstream database connection limits or API rate limits.
+## Application-Level Caching
+
+The application implements an in-memory TTL read-through cache:
+
+```text
+Request Job
+     ↓
+Check Cache
+     ↓
+ ┌───┴────┐
+ │        │
+ HIT     MISS
+ │        │
+ ▼        ▼
+Return   DynamoDB
+         │
+         ▼
+       Cache
+```
+
+- **First Request (Cache MISS)**: Query DynamoDB → Store in Cache with TTL (default: 60s).
+- **Subsequent Requests (Cache HIT)**: Return directly from application memory (~2ms response time vs. ~20ms database roundtrip).
+- **Telemetry**: Hit and miss metrics are recorded and observable via the dashboard and logs.
 
 ---
 
-## 16. Benchmark Methodology
-The platform executes identical deterministic job workloads (calculating math checksums and 150ms I/O delays) across Serial, Parallel SQS+Lambda, and Parallel + Cache modes for batch sizes of 10, 20, 50, and 100 jobs.
+## Empirical Benchmark Performance Results
+
+Benchmarking identical deterministic workloads (computing checksums + simulated 150ms I/O per job) across serial and event-driven architectures:
+
+| Mode                      | 10 Jobs | 20 Jobs | 50 Jobs | 100 Jobs | Speedup vs Baseline  |
+| :------------------------ | :-----: | :-----: | :-----: | :------: | :------------------: |
+| **Serial Baseline**       |  1.50s  |  3.00s  |  7.50s  |  15.00s  |      _Baseline_      |
+| **Parallel SQS + Lambda** |  0.18s  |  0.21s  |  0.24s  |  0.29s   | **88% – 98% faster** |
+| **Parallel + Cache HIT**  | 0.012s  | 0.014s  | 0.018s  |  0.022s  |   **99%+ faster**    |
 
 ---
 
-## 17. Performance Results
+## Infrastructure as Code — Terraform
 
-| Mode | 10 Jobs | 20 Jobs | 50 Jobs | 100 Jobs | Speedup |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **Serial Baseline** | 1.50s | 3.00s | 7.50s | 15.00s | Baseline |
-| **Parallel SQS + Lambda** | 0.18s | 0.21s | 0.24s | 0.29s | **88% - 98% faster** |
-| **Parallel + Redis Cache** | 0.012s | 0.014s | 0.018s | 0.022s | **99%+ faster** |
+All cloud resources are provisioned deterministically using modular Terraform code in `/infrastructure`:
 
----
-
-## 18. AWS Architecture Component Details
-- **API Gateway**: REST API routing, rate limiting, and CORS headers.
-- **SQS**: Standard Queue with visibility timeout (30s) and DLQ redrive policy.
-- **Lambda**: Producer function and SQS-triggered worker function pool.
-- **DynamoDB**: On-Demand single-table store (`JobsTable`, `BatchesTable`, `BenchmarksTable`).
-- **Redis**: ElastiCache in-memory TTL caching.
-- **S3**: Exported benchmark audit logs.
-- **CloudWatch**: Logs, alarms, and concurrency metrics.
-
----
-
-## 19. Infrastructure as Code (Terraform)
-Located in `/infrastructure`:
 ```bash
 cd infrastructure/environments/dev
 terraform init
+terraform validate
 terraform plan
 terraform apply
 ```
 
+- **Reproducibility**: Environment parameters (Region: `ap-south-1`, variables, tags) are version-controlled.
+- **Automated Packaging**: Lambda bundles are compiled with `esbuild` and packaged into deployment artifacts via `npm run bundle:lambdas`.
+
 ---
 
-## 20. Local Development Setup
+## Frontend Infrastructure Deployment
+
+The platform provides a planned frontend-controlled Terraform workflow where operators can initiate infrastructure deployments directly from the dashboard:
+
+```text
+Frontend Dashboard
+       ↓
+Backend API
+       ↓
+Terraform CLI
+       ↓
+AWS Cloud
+```
+
+The UI streams terminal-style execution output (`init`, `validate`, `plan`), provides an explicit approval modal (`YES, APPLY` / `CANCEL`), and surfaces any execution errors safely without exposing arbitrary shell access.
+
+---
+
+## Technology Stack
+
+| Layer            | Technologies                                                                                  |
+| :--------------- | :-------------------------------------------------------------------------------------------- |
+| **Frontend**     | React 18, TypeScript, Vite, Tailwind CSS, Framer Motion, React Three Fiber, Recharts          |
+| **Backend**      | Node.js (v20 LTS), Express REST API, TypeScript, Vitest                                       |
+| **AWS Services** | Amazon API Gateway, AWS Lambda, Amazon SQS + DLQ, Amazon DynamoDB, Amazon CloudWatch, AWS IAM |
+| **DevOps & IaC** | Terraform, GitHub Actions CI/CD, esbuild, Docker / LocalStack                                 |
+
+---
+
+## Local Development & Quickstart
+
+### Prerequisites
+
+- Node.js 20.x LTS
+- Terraform 1.5+
+- (Optional) AWS CLI configured or Docker for LocalStack
+
+### 1. Installation & Build
 
 ```bash
-# 1. Install all monorepo dependencies
+# Clone the repository
+git clone https://github.com/mahesh7805/aws-event-driven-performance-optimization-platform.git
+cd aws-event-driven-performance-optimization-platform
+
+# Install monorepo dependencies
 npm install
 
-# 2. Run TypeScript type checks
+# Bundle Lambda functions
+npm run bundle:lambdas
+```
+
+### 2. Validation & Testing
+
+```bash
+# Linting
+npm run lint
+
+# TypeScript Typecheck across all workspaces
 npm run typecheck
 
-# 3. Run full Vitest test suite
+# Execute Vitest test suite (unit & integration tests)
 npm run test
 
-# 4. Start local emulator stack (LocalStack + Redis)
-docker-compose up -d
+# Validate Terraform configuration
+terraform fmt -check -recursive infrastructure
+terraform -chdir="infrastructure/environments/dev" validate
+```
 
-# 5. Start Backend REST API
+### 3. Start Local Servers
+
+```bash
+# Start backend API (Port 5000)
 npm run dev:backend
 
-# 6. Start Frontend Dashboard
+# Start frontend dashboard (Port 5173)
 npm run dev:frontend
 ```
 
 ---
 
-## 21. CI/CD Pipeline
-GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push:
-1. ESLint code validation.
-2. TypeScript typecheck across all workspaces.
-3. Vitest unit and integration test suite execution.
-4. Production bundle builds.
-5. Terraform syntax validation.
+## Security & Failure Handling
+
+- **Least-Privilege IAM**: Producer and Worker roles contain strict resource-scoped policies for SQS (`SendMessage`, `ReceiveMessage`, `DeleteMessage`) and DynamoDB (`PutItem`, `GetItem`, `UpdateItem`).
+- **Zero Hardcoded Secrets**: All configuration is injected via environment variables and IAM execution roles.
+- **Failure Resilience**: Transient failures are automatically retried by SQS visibility timeout; persistent failures are routed to the Dead Letter Queue (DLQ).
 
 ---
 
-## 22. Security Controls
-- Least-privilege IAM policies.
-- No hardcoded AWS credentials (environment variables & IAM roles).
-- API Gateway rate limiting and CORS headers.
-- S3 server-side encryption (SSE-S3).
+## Cost Considerations
+
+The platform is designed with a serverless, cost-optimized pay-per-request model:
+
+- **AWS Lambda**: Free tier covers 1M invocations & 3.2M compute-seconds monthly.
+- **Amazon SQS**: Free tier covers 1M requests monthly.
+- **Amazon DynamoDB**: On-Demand capacity mode charges strictly per read/write unit consumed ($0 when idle).
+- **Idle Cost**: **$0.00/month** when no jobs are executing.
 
 ---
 
-## 23. Cost Considerations
-- **Lambda**: Free Tier includes 1M requests & 3.2M seconds of compute time per month.
-- **SQS**: Free Tier includes 1M requests per month.
-- **DynamoDB**: On-Demand PAY_PER_REQUEST pricing charges only for read/write units consumed.
-- **Redis / ElastiCache**: Use t4g.micro for dev environments.
+## Final Interview Summary
 
----
-
-## 24. Limitations
-- SQS standard queues provide at-least-once delivery (requires worker idempotency).
-- Cold starts may add ~100-200ms latency to the initial Lambda worker invocation.
-
----
-
-## 25. Future Improvements
-- Implement WebSocket Server-Sent Events for real-time worker push updates.
-- Add DynamoDB Streams for real-time CDC analytics.
-- Integrate AWS X-Ray for distributed request tracing.
+> **"I built an AWS serverless event-driven job-processing platform to address the performance limitations of serial workload processing. The frontend submits jobs through API Gateway to a producer Lambda, which places them into an SQS queue. Lambda workers consume the queue asynchronously, allowing independent jobs to be processed concurrently. DynamoDB stores the persistent job state, while an application-level TTL cache reduces repeated database reads for frequently accessed data. I use Terraform as Infrastructure as Code to provision and manage the AWS infrastructure, and I added a frontend deployment workflow that allows Terraform initialization, validation, planning, approval, and application to be controlled from the dashboard. The project demonstrates serverless computing, event-driven architecture, asynchronous processing, scalability, caching, observability, IAM, and Infrastructure as Code."**
