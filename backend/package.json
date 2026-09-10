@@ -12,7 +12,10 @@
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.20.0"
+    "express": "^4.20.0",
+    "@aws-sdk/client-dynamodb": "^3.645.0",
+    "@aws-sdk/client-sqs": "^3.645.0",
+    "@aws-sdk/lib-dynamodb": "^3.645.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

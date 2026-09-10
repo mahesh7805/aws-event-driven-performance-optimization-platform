@@ -39,6 +39,7 @@ export class TerraformService {
   private isBusy = false;
   private currentOperation: string | null = null;
   private terraformDir: string;
+  private cachedOutputs: Record<string, any> = {};
   private lastRun?: {
     command: string;
     success: boolean;
@@ -48,6 +49,64 @@ export class TerraformService {
 
   constructor(customDir?: string) {
     this.terraformDir = customDir || this.resolveTerraformDirectory();
+    this.loadOutputsFromState();
+  }
+
+  public loadOutputsFromState(): Record<string, any> {
+    try {
+      const stateFile = path.join(this.terraformDir, 'terraform.tfstate');
+      if (fs.existsSync(stateFile)) {
+        const raw = fs.readFileSync(stateFile, 'utf-8');
+        const state = JSON.parse(raw);
+        if (state.outputs) {
+          const simplified: Record<string, any> = {};
+          for (const [key, val] of Object.entries(state.outputs)) {
+            simplified[key] = (val as any).value ?? val;
+          }
+          this.cachedOutputs = simplified;
+          return simplified;
+        }
+      }
+    } catch {
+      // Ignore read errors
+    }
+    return {};
+  }
+
+  public getCachedOutputs(): Record<string, any> {
+    if (Object.keys(this.cachedOutputs).length === 0) {
+      this.loadOutputsFromState();
+    }
+    return { ...this.cachedOutputs };
+  }
+
+  public getJobsTableName(): string | null {
+    const outputs = this.getCachedOutputs();
+    return outputs['jobs_table_name'] || process.env.DYNAMODB_JOBS_TABLE || null;
+  }
+
+  public getBatchesTableName(): string | null {
+    const outputs = this.getCachedOutputs();
+    return outputs['batches_table_name'] || process.env.DYNAMODB_BATCHES_TABLE || null;
+  }
+
+  public getSqsQueueUrl(): string | null {
+    const outputs = this.getCachedOutputs();
+    return outputs['sqs_queue_url'] || process.env.SQS_QUEUE_URL || null;
+  }
+
+  public getApiEndpoint(): string | null {
+    const outputs = this.getCachedOutputs();
+    return outputs['api_endpoint'] || process.env.API_ENDPOINT || null;
+  }
+
+  public getAwsRegion(): string {
+    const queueUrl = this.getSqsQueueUrl();
+    if (queueUrl) {
+      const match = queueUrl.match(/sqs\.([a-z0-9-]+)\.amazonaws\.com/);
+      if (match && match[1]) return match[1];
+    }
+    return process.env.AWS_REGION || 'ap-south-1';
   }
 
   private resolveTerraformDirectory(): string {
@@ -243,6 +302,7 @@ export class TerraformService {
     if (result.success) {
       try {
         const outputs = await this.getOutputsRaw();
+        this.cachedOutputs = outputs;
         result.outputs = outputs;
       } catch {
         // Output retrieval failure is non-fatal to apply result
@@ -254,6 +314,7 @@ export class TerraformService {
   public async destroy(): Promise<TerraformCommandResult> {
     const result = await this.executeCommand('destroy', ['destroy', '-auto-approve', '-no-color']);
     if (result.success) {
+      this.cachedOutputs = {};
       result.outputs = {};
     }
     return result;
@@ -268,6 +329,7 @@ export class TerraformService {
         for (const [key, val] of Object.entries(parsed)) {
           simplified[key] = (val as any).value ?? val;
         }
+        this.cachedOutputs = simplified;
         result.outputs = simplified;
       } catch (err: any) {
         console.error('[Terraform ERROR] Failed to parse terraform output JSON:', err);

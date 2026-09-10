@@ -191,3 +191,19 @@ export async function getTerraformOutputs(): Promise<TerraformCommandResult> {
   const res = await fetch('/api/terraform/outputs');
   return res.json();
 }
+
+export interface CloudSyncStatus {
+  dynamoDbConnected: boolean;
+  jobsTableName: string | null;
+  batchesTableName: string | null;
+  sqsConnected: boolean;
+  sqsQueueUrl: string | null;
+  apiEndpoint: string | null;
+  region: string;
+}
+
+export async function getCloudSyncStatus(): Promise<CloudSyncStatus> {
+  const res = await fetch('/api/infrastructure/sync-status');
+  if (!res.ok) throw new Error(`Failed to fetch sync status (${res.status})`);
+  return res.json();
+}

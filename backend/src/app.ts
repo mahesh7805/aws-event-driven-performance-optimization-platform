@@ -30,6 +30,7 @@ export const createApp = () => {
         terraformApply: 'POST /api/terraform/apply',
         terraformDestroy: 'POST /api/terraform/destroy',
         terraformOutputs: 'GET /api/terraform/outputs',
+        infrastructureSyncStatus: 'GET /api/infrastructure/sync-status',
       },
       timestamp: new Date().toISOString(),
     });

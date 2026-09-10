@@ -3,6 +3,7 @@ import { SQSClient, SendMessageBatchCommand, SendMessageBatchRequestEntry } from
 import { Job, Batch } from '../models/types.js';
 import { DataRepository } from '../repositories/repository.js';
 import { executeDeterministicWorkload } from './serialProcessor.js';
+import { globalTerraformService } from './terraformService.js';
 
 export interface ParallelProcessorOptions {
   jobCount: number;
@@ -19,11 +20,6 @@ export interface SQSMessagePayload {
   isPoisonPill?: boolean;
 }
 
-const sqsClient = new SQSClient({
-  region: process.env.AWS_REGION || 'us-east-1',
-  endpoint: process.env.AWS_ENDPOINT || undefined,
-});
-
 const SQS_MAX_BATCH_SIZE = 10;
 
 /**
@@ -33,6 +29,14 @@ const SQS_MAX_BATCH_SIZE = 10;
  */
 export class ParallelProcessor {
   constructor(private repo: DataRepository) {}
+
+  private getSqsClient(): SQSClient {
+    const region = globalTerraformService.getAwsRegion();
+    return new SQSClient({
+      region,
+      endpoint: process.env.AWS_ENDPOINT || undefined,
+    });
+  }
 
   public async processBatch(options: ParallelProcessorOptions): Promise<{ batch: Batch; jobs: Job[] }> {
     const jobCount = Math.max(1, Math.min(500, options.jobCount));
@@ -55,7 +59,7 @@ export class ParallelProcessor {
     const jobs: Job[] = [];
     const sqsMessages: SQSMessagePayload[] = [];
 
-    // Step 1: Initialize all jobs in QUEUED status
+    // Step 1: Initialize all jobs in QUEUED status (and persist to DynamoDB)
     for (let i = 1; i <= jobCount; i++) {
       const jobId = `job-${batchId}-${i}`;
       const isPoisonPill = options.failJobId === jobId || (options.failJobId === 'all' && i === 1);
@@ -81,22 +85,29 @@ export class ParallelProcessor {
     }
 
     // Step 2: Enqueue to SQS in batches of max 10 (Strict AWS SendMessageBatch limit)
-    const queueUrl = process.env.SQS_QUEUE_URL;
+    const queueUrl = process.env.NODE_ENV === 'test' ? undefined : globalTerraformService.getSqsQueueUrl();
 
     if (queueUrl) {
       const entries: SendMessageBatchRequestEntry[] = sqsMessages.map((msg) => ({
-        Id: msg.jobId,
+        Id: msg.jobId.replace(/[^a-zA-Z0-9_-]/g, '_'),
         MessageBody: JSON.stringify(msg),
       }));
 
-      for (let i = 0; i < entries.length; i += SQS_MAX_BATCH_SIZE) {
-        const batchChunk = entries.slice(i, i + SQS_MAX_BATCH_SIZE);
-        await sqsClient.send(
-          new SendMessageBatchCommand({
-            QueueUrl: queueUrl,
-            Entries: batchChunk,
-          })
-        );
+      try {
+        const client = this.getSqsClient();
+        for (let i = 0; i < entries.length; i += SQS_MAX_BATCH_SIZE) {
+          const batchChunk = entries.slice(i, i + SQS_MAX_BATCH_SIZE);
+          await client.send(
+            new SendMessageBatchCommand({
+              QueueUrl: queueUrl,
+              Entries: batchChunk,
+            })
+          );
+        }
+        console.log(`[ParallelProcessor] Successfully dispatched ${sqsMessages.length} jobs to SQS queue: ${queueUrl}`);
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[ParallelProcessor Warning] SQS dispatch failed, proceeding with local worker processing: ${errMsg}`);
       }
     }
 

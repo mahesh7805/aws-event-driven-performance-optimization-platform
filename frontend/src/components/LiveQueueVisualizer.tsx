@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Cpu, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
-import { runParallelBatch, getBatchDetails } from '../services/apiClient';
+import { Cpu, RefreshCw, CheckCircle2, AlertCircle, Database, Cloud } from 'lucide-react';
+import { runParallelBatch, getBatchDetails, getCloudSyncStatus, CloudSyncStatus } from '../services/apiClient';
 
 interface QueueJobItem {
   id: string;
@@ -15,6 +15,20 @@ export const LiveQueueVisualizer: React.FC = () => {
   const [jobs, setJobs] = useState<QueueJobItem[]>([]);
   const [running, setRunning] = useState<boolean>(false);
   const [batchId, setBatchId] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<CloudSyncStatus | null>(null);
+
+  const fetchSyncStatus = async () => {
+    try {
+      const status = await getCloudSyncStatus();
+      setSyncStatus(status);
+    } catch {
+      // Ignore background sync check errors
+    }
+  };
+
+  useEffect(() => {
+    fetchSyncStatus();
+  }, []);
 
   const startLiveSimulation = async () => {
     setRunning(true);
@@ -79,6 +93,28 @@ export const LiveQueueVisualizer: React.FC = () => {
           <p className="text-xs text-slate-500 mt-1">
             Real-time stage transitions: SQS Message Queue &rarr; Lambda Worker Pool &rarr; DynamoDB Persistence.
           </p>
+
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            {syncStatus?.dynamoDbConnected ? (
+              <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <Database className="h-3 w-3 text-emerald-600" />
+                <span>DynamoDB: {syncStatus.jobsTableName}</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                <Database className="h-3 w-3 text-slate-400" />
+                <span>DynamoDB: In-Memory Mode (Deploy infra to sync)</span>
+              </span>
+            )}
+
+            {syncStatus?.sqsConnected && (
+              <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+                <Cloud className="h-3 w-3 text-indigo-600" />
+                <span>AWS SQS Active ({syncStatus.region})</span>
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center space-x-3">

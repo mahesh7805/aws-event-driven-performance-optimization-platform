@@ -86,6 +86,18 @@ apiRouter.get('/terraform/outputs', async (_req: Request, res: Response) => {
   }
 });
 
+// GET /api/infrastructure/sync-status
+apiRouter.get('/infrastructure/sync-status', (_req: Request, res: Response) => {
+  const repoStatus = globalRepository.getCloudSyncStatus();
+  const sqsQueueUrl = globalTerraformService.getSqsQueueUrl();
+  res.json({
+    ...repoStatus,
+    sqsConnected: Boolean(sqsQueueUrl),
+    sqsQueueUrl,
+    apiEndpoint: globalTerraformService.getApiEndpoint(),
+  });
+});
+
 // POST /api/batches/serial
 apiRouter.post('/batches/serial', async (req: Request, res: Response) => {
   try {

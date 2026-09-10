@@ -1,14 +1,19 @@
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { Job, Batch, Benchmark, CacheStats } from '../models/types.js';
+import { globalTerraformService } from '../services/terraformService.js';
 
 /**
  * Data Repository for Jobs, Batches, and Benchmarks.
- * Backed by high-performance in-memory storage with optional DynamoDB sync.
+ * Backed by high-performance in-memory cache with automatic Amazon DynamoDB cloud sync.
  */
 export class DataRepository {
   private jobs = new Map<string, Job>();
   private batches = new Map<string, Batch>();
   private benchmarks = new Map<string, Benchmark>();
   private processedIdempotencyKeys = new Set<string>();
+  private docClientInstance: DynamoDBDocumentClient | null = null;
+  private currentRegion: string | null = null;
 
   private stats: CacheStats = {
     hits: 0,
@@ -17,16 +22,93 @@ export class DataRepository {
     databaseReads: 0,
   };
 
+  private getDocClient(): DynamoDBDocumentClient {
+    const region = globalTerraformService.getAwsRegion();
+    if (!this.docClientInstance || this.currentRegion !== region) {
+      const ddbClient = new DynamoDBClient({
+        region,
+        endpoint: process.env.AWS_ENDPOINT || undefined,
+      });
+      this.docClientInstance = DynamoDBDocumentClient.from(ddbClient, {
+        marshallOptions: { removeUndefinedValues: true },
+      });
+      this.currentRegion = region;
+    }
+    return this.docClientInstance;
+  }
+
+  private getJobsTableName(): string | null {
+    if (process.env.NODE_ENV === 'test') return null;
+    return globalTerraformService.getJobsTableName();
+  }
+
+  private getBatchesTableName(): string | null {
+    if (process.env.NODE_ENV === 'test') return null;
+    return globalTerraformService.getBatchesTableName();
+  }
+
   // --- Job Operations ---
   public async createJob(job: Job): Promise<Job> {
     this.jobs.set(job.jobId, { ...job });
+
+    const tableName = this.getJobsTableName();
+    if (tableName) {
+      try {
+        const client = this.getDocClient();
+        await client.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: {
+              jobId: job.jobId,
+              batchId: job.batchId,
+              status: job.status,
+              createdAt: job.createdAt,
+              startedAt: job.startedAt,
+              completedAt: job.completedAt,
+              duration: job.duration,
+              result: job.result,
+              error: job.error,
+            },
+          })
+        );
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[DynamoDB Warning] Failed to persist job ${job.jobId} to ${tableName}: ${errMsg}`);
+      }
+    }
     return job;
   }
 
   public async getJob(jobId: string): Promise<Job | null> {
     this.stats.databaseReads++;
     const job = this.jobs.get(jobId);
-    return job ? { ...job } : null;
+    if (job) return { ...job };
+
+    const tableName = this.getJobsTableName();
+    if (tableName) {
+      try {
+        const client = this.getDocClient();
+        const queryRes = await client.send(
+          new QueryCommand({
+            TableName: tableName,
+            KeyConditionExpression: 'jobId = :jid',
+            ExpressionAttributeValues: {
+              ':jid': jobId,
+            },
+            Limit: 1,
+          })
+        );
+        if (queryRes.Items && queryRes.Items.length > 0) {
+          const item = queryRes.Items[0] as Job;
+          this.jobs.set(item.jobId, item);
+          return { ...item };
+        }
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[DynamoDB Warning] Failed to query job ${jobId} from ${tableName}: ${errMsg}`);
+      }
+    }
+    return null;
   }
 
   public async getOrCreateJob(jobId: string): Promise<Job> {
@@ -46,6 +128,10 @@ export class DataRepository {
         },
       };
       this.jobs.set(jobId, job);
+      const tableName = this.getJobsTableName();
+      if (tableName) {
+        await this.createJob(job);
+      }
     }
     return { ...job };
   }
@@ -53,25 +139,97 @@ export class DataRepository {
   public async updateJob(jobId: string, updates: Partial<Job>): Promise<Job | null> {
     const existing = this.jobs.get(jobId);
     if (!existing) return null;
-    const updated = { ...existing, ...updates };
+    const updated: Job = { ...existing, ...updates };
     this.jobs.set(jobId, updated);
+
+    const tableName = this.getJobsTableName();
+    if (tableName) {
+      try {
+        const client = this.getDocClient();
+        await client.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: {
+              jobId: updated.jobId,
+              batchId: updated.batchId,
+              status: updated.status,
+              createdAt: updated.createdAt,
+              startedAt: updated.startedAt,
+              completedAt: updated.completedAt,
+              duration: updated.duration,
+              result: updated.result,
+              error: updated.error,
+            },
+          })
+        );
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[DynamoDB Warning] Failed to update job ${jobId} in ${tableName}: ${errMsg}`);
+      }
+    }
     return updated;
   }
 
   public async getJobsByBatch(batchId: string): Promise<Job[]> {
     this.stats.databaseReads++;
-    const result: Job[] = [];
+    const memoryJobs: Job[] = [];
     for (const job of this.jobs.values()) {
       if (job.batchId === batchId) {
-        result.push({ ...job });
+        memoryJobs.push({ ...job });
       }
     }
-    return result;
+    if (memoryJobs.length > 0) {
+      return memoryJobs;
+    }
+
+    const tableName = this.getJobsTableName();
+    if (tableName) {
+      try {
+        const client = this.getDocClient();
+        const queryRes = await client.send(
+          new QueryCommand({
+            TableName: tableName,
+            IndexName: 'BatchIndex',
+            KeyConditionExpression: 'batchId = :bid',
+            ExpressionAttributeValues: {
+              ':bid': batchId,
+            },
+          })
+        );
+        if (queryRes.Items && queryRes.Items.length > 0) {
+          const cloudJobs = queryRes.Items as Job[];
+          for (const cj of cloudJobs) {
+            this.jobs.set(cj.jobId, cj);
+          }
+          return cloudJobs;
+        }
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[DynamoDB Warning] Failed to query jobs for batch ${batchId} from ${tableName}: ${errMsg}`);
+      }
+    }
+    return [];
   }
 
   // --- Batch Operations ---
   public async createBatch(batch: Batch): Promise<Batch> {
     this.batches.set(batch.batchId, { ...batch });
+
+    const tableName = this.getBatchesTableName();
+    if (tableName) {
+      try {
+        const client = this.getDocClient();
+        await client.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: { ...batch },
+          })
+        );
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[DynamoDB Warning] Failed to persist batch ${batch.batchId} to ${tableName}: ${errMsg}`);
+      }
+    }
     return batch;
   }
 
@@ -84,8 +242,24 @@ export class DataRepository {
   public async updateBatch(batchId: string, updates: Partial<Batch>): Promise<Batch | null> {
     const existing = this.batches.get(batchId);
     if (!existing) return null;
-    const updated = { ...existing, ...updates };
+    const updated: Batch = { ...existing, ...updates };
     this.batches.set(batchId, updated);
+
+    const tableName = this.getBatchesTableName();
+    if (tableName) {
+      try {
+        const client = this.getDocClient();
+        await client.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: { ...updated },
+          })
+        );
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[DynamoDB Warning] Failed to update batch ${batchId} in ${tableName}: ${errMsg}`);
+      }
+    }
     return updated;
   }
 
@@ -155,6 +329,22 @@ export class DataRepository {
     this.benchmarks.clear();
     this.processedIdempotencyKeys.clear();
     this.resetStats();
+  }
+
+  public getCloudSyncStatus(): {
+    dynamoDbConnected: boolean;
+    jobsTableName: string | null;
+    batchesTableName: string | null;
+    region: string;
+  } {
+    const jobsTableName = this.getJobsTableName();
+    const batchesTableName = this.getBatchesTableName();
+    return {
+      dynamoDbConnected: Boolean(jobsTableName),
+      jobsTableName,
+      batchesTableName,
+      region: globalTerraformService.getAwsRegion(),
+    };
   }
 }
 

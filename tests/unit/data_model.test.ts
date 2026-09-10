@@ -101,4 +101,32 @@ describe('Layer 1 - Data Model & Repository CRUD Tests', () => {
     expect(stats.misses).toBe(1);
     expect(stats.hitRate).toBe(0.6667);
   });
+
+  it('should report cloud sync status correctly', () => {
+    const status = repo.getCloudSyncStatus();
+    expect(status).toHaveProperty('dynamoDbConnected');
+    expect(status).toHaveProperty('region');
+    expect(typeof status.region).toBe('string');
+  });
+
+  it('should gracefully handle job creation and updates with or without cloud persistence', async () => {
+    const job: Job = {
+      jobId: 'job-resilience-1',
+      batchId: 'batch-resilience-1',
+      status: 'QUEUED',
+      createdAt: new Date().toISOString(),
+    };
+
+    const created = await repo.createJob(job);
+    expect(created.jobId).toBe('job-resilience-1');
+    expect(created.status).toBe('QUEUED');
+
+    const updated = await repo.updateJob('job-resilience-1', {
+      status: 'COMPLETED',
+      duration: 50,
+      completedAt: new Date().toISOString(),
+    });
+    expect(updated?.status).toBe('COMPLETED');
+    expect(updated?.duration).toBe(50);
+  });
 });
