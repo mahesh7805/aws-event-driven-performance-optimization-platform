@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Navbar, TabId } from './components/Navbar';
+import { Sidebar, TabId } from './components/Sidebar';
 import { Hero3D } from './components/Hero3D';
 import { KPISection } from './components/KPISection';
 import { BenchmarkLab } from './components/BenchmarkLab';
@@ -18,47 +18,49 @@ export function App() {
   const [latestMetrics, setLatestMetrics] = useState<BenchmarkResponse | null>(null);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
-      <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col md:flex-row font-sans">
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {activeTab === 'dashboard' && (
-          <>
-            <Hero3D />
-            <KPISection metrics={latestMetrics} />
+      <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden">
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+          {activeTab === 'dashboard' && (
+            <>
+              <Hero3D />
+              <KPISection metrics={latestMetrics} />
+              <BenchmarkLab onBenchmarkComplete={setLatestMetrics} />
+            </>
+          )}
+
+          {activeTab === 'infrastructure' && <InfrastructureDeployment />}
+
+          {activeTab === 'benchmark' && (
             <BenchmarkLab onBenchmarkComplete={setLatestMetrics} />
-          </>
-        )}
+          )}
 
-        {activeTab === 'infrastructure' && <InfrastructureDeployment />}
+          {activeTab === 'queue' && <LiveQueueVisualizer />}
 
-        {activeTab === 'benchmark' && (
-          <BenchmarkLab onBenchmarkComplete={setLatestMetrics} />
-        )}
+          {activeTab === 'cache' && <CacheObservatory />}
 
-        {activeTab === 'queue' && <LiveQueueVisualizer />}
+          {activeTab === 'architecture' && <ArchitectureDiagram />}
 
-        {activeTab === 'cache' && <CacheObservatory />}
+          {activeTab === 'observability' && <ObservabilityDashboard />}
 
-        {activeTab === 'architecture' && <ArchitectureDiagram />}
+          {activeTab === 'failure' && <FailureLab />}
 
-        {activeTab === 'observability' && <ObservabilityDashboard />}
+          {activeTab === 'migration' && <CloudMigrationDemo />}
 
-        {activeTab === 'failure' && <FailureLab />}
+          {activeTab === 'interview' && <InterviewMode />}
+        </main>
 
-        {activeTab === 'migration' && <CloudMigrationDemo />}
-
-        {activeTab === 'interview' && <InterviewMode />}
-      </main>
-
-      <footer className="bg-white border-t border-slate-200 py-6 mt-12 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between">
-          <p>© 2026 AWS Event-Driven Performance Optimization Platform.</p>
-          <p className="mt-2 sm:mt-0 font-mono text-[11px] text-slate-400">
-            Node.js + Express + SQS + Lambda + Redis + DynamoDB + R3F + React
-          </p>
-        </div>
-      </footer>
+        <footer className="bg-white border-t border-slate-200 py-6 mt-12 text-center text-xs text-slate-500">
+          <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between">
+            <p>© 2026 AWS Event-Driven Performance Optimization Platform.</p>
+            <p className="mt-2 sm:mt-0 font-mono text-[11px] text-slate-400">
+              Node.js + Express + SQS + Lambda + Redis + DynamoDB + R3F + React
+            </p>
+          </div>
+        </footer>
+      </div>
     </div>
   );
 }

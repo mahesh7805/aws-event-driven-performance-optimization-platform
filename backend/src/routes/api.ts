@@ -140,7 +140,13 @@ apiRouter.get('/batches/:batchId', async (req: Request, res: Response) => {
 apiRouter.get('/batches', async (_req: Request, res: Response) => {
   try {
     const batches = await globalRepository.getAllBatches();
-    res.json({ batches });
+    const batchesTableName = globalTerraformService.getBatchesTableName();
+    res.json({
+      batches,
+      totalBatches: batches.length,
+      dynamoDbConnected: Boolean(batchesTableName),
+      batchesTableName,
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

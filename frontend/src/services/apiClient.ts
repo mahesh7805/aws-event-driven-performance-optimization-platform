@@ -90,6 +90,32 @@ export async function getBatchDetails(batchId: string): Promise<BatchResponse> {
   return res.json();
 }
 
+export interface BatchRecord {
+  batchId: string;
+  mode: 'SERIAL' | 'PARALLEL' | 'PARALLEL_CACHED';
+  totalJobs: number;
+  completedJobs: number;
+  failedJobs: number;
+  startedAt: string;
+  completedAt?: string;
+  totalDuration?: number;
+  durationMs?: number;
+  status?: 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | string;
+}
+
+export interface BatchesListResponse {
+  batches: BatchRecord[];
+  totalBatches: number;
+  dynamoDbConnected?: boolean;
+  batchesTableName?: string | null;
+}
+
+export async function getAllBatches(): Promise<BatchesListResponse> {
+  const res = await fetch('/api/batches');
+  if (!res.ok) throw new Error(`Failed to fetch batches (${res.status})`);
+  return res.json();
+}
+
 export async function runBenchmark(jobCount: number, jobProcessingMs: number = 150): Promise<BenchmarkResponse> {
   const res = await fetch('/api/benchmarks', {
     method: 'POST',

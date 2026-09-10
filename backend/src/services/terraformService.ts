@@ -87,7 +87,13 @@ export class TerraformService {
 
   public getBatchesTableName(): string | null {
     const outputs = this.getCachedOutputs();
-    return outputs['batches_table_name'] || process.env.DYNAMODB_BATCHES_TABLE || null;
+    if (outputs['batches_table_name']) return outputs['batches_table_name'];
+    if (process.env.DYNAMODB_BATCHES_TABLE) return process.env.DYNAMODB_BATCHES_TABLE;
+    const jobsTable = this.getJobsTableName();
+    if (jobsTable && jobsTable.includes('JobsTable')) {
+      return jobsTable.replace('JobsTable', 'BatchesTable');
+    }
+    return null;
   }
 
   public getSqsQueueUrl(): string | null {

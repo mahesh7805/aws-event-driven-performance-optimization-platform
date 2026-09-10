@@ -1,5 +1,5 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, QueryCommand, ScanCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
 import { Job, Batch, Benchmark, CacheStats } from '../models/types.js';
 import { globalTerraformService } from '../services/terraformService.js';
 
@@ -236,7 +236,29 @@ export class DataRepository {
   public async getBatch(batchId: string): Promise<Batch | null> {
     this.stats.databaseReads++;
     const batch = this.batches.get(batchId);
-    return batch ? { ...batch } : null;
+    if (batch) return { ...batch };
+
+    const tableName = this.getBatchesTableName();
+    if (tableName && process.env.NODE_ENV !== 'test') {
+      try {
+        const client = this.getDocClient();
+        const res = await client.send(
+          new GetCommand({
+            TableName: tableName,
+            Key: { batchId },
+          })
+        );
+        if (res.Item) {
+          const cloudBatch = res.Item as Batch;
+          this.batches.set(cloudBatch.batchId, cloudBatch);
+          return { ...cloudBatch };
+        }
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[DynamoDB Warning] Failed to get batch ${batchId} from ${tableName}: ${errMsg}`);
+      }
+    }
+    return null;
   }
 
   public async updateBatch(batchId: string, updates: Partial<Batch>): Promise<Batch | null> {
@@ -265,7 +287,42 @@ export class DataRepository {
 
   public async getAllBatches(): Promise<Batch[]> {
     this.stats.databaseReads++;
-    return Array.from(this.batches.values()).map((b) => ({ ...b }));
+    const batchesMap = new Map<string, Batch>();
+
+    // 1. Seed from local in-memory batches
+    for (const batch of this.batches.values()) {
+      batchesMap.set(batch.batchId, { ...batch });
+    }
+
+    // 2. Query DynamoDB BatchesTable if configured
+    const tableName = this.getBatchesTableName();
+    if (tableName && process.env.NODE_ENV !== 'test') {
+      try {
+        const client = this.getDocClient();
+        const scanRes = await client.send(
+          new ScanCommand({
+            TableName: tableName,
+          })
+        );
+        if (scanRes.Items && scanRes.Items.length > 0) {
+          for (const item of scanRes.Items) {
+            const cloudBatch = item as Batch;
+            const existing = batchesMap.get(cloudBatch.batchId);
+            if (!existing || (cloudBatch.completedJobs ?? 0) >= (existing.completedJobs ?? 0)) {
+              batchesMap.set(cloudBatch.batchId, cloudBatch);
+              this.batches.set(cloudBatch.batchId, cloudBatch);
+            }
+          }
+        }
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[DynamoDB Warning] Failed to scan batches from ${tableName}: ${errMsg}`);
+      }
+    }
+
+    return Array.from(batchesMap.values()).sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+    );
   }
 
   // --- Benchmark Operations ---
