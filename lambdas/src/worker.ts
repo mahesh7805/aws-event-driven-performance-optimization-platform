@@ -1,4 +1,4 @@
-import { SQSEvent, SQSBatchResponse } from 'aws-lambda';
+import { SQSEvent, SQSBatchResponse, Context } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 
@@ -15,7 +15,19 @@ const processedKeys = new Set<string>();
  * Parallel SQS Worker Lambda Handler
  * Processes job messages from SQS concurrently within a batch, enforcing DynamoDB idempotency.
  */
-export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
+export const handler = async (event: SQSEvent, context?: Context): Promise<SQSBatchResponse> => {
+  console.log("TEST: Lambda invocation started", {
+    timestamp: new Date().toISOString(),
+    requestId: context?.awsRequestId
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+
+  console.log("TEST: 3-second delay completed", {
+    timestamp: new Date().toISOString(),
+    requestId: context?.awsRequestId
+  });
+
   const batchItemFailures: { itemIdentifier: string }[] = [];
 
   // Process all records in the SQS event batch concurrently using Promise.all

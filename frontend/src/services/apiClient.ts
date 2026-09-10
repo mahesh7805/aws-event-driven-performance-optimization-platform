@@ -233,3 +233,28 @@ export async function getCloudSyncStatus(): Promise<CloudSyncStatus> {
   if (!res.ok) throw new Error(`Failed to fetch sync status (${res.status})`);
   return res.json();
 }
+
+export interface LambdaConcurrencyDatapoint {
+  timestamp: string;
+  maximum: number;
+  average: number;
+  unit: string;
+}
+
+export interface LambdaConcurrencyMetrics {
+  functionName: string;
+  region: string;
+  targetConcurrency: number;
+  peakMaximum: number;
+  latestMaximum: number;
+  datapoints: LambdaConcurrencyDatapoint[];
+  queryTime: string;
+  error?: string;
+}
+
+export async function getLambdaConcurrencyMetrics(): Promise<LambdaConcurrencyMetrics> {
+  const res = await fetch('/api/metrics/lambda-concurrency');
+  if (!res.ok) throw new Error(`Failed to fetch Lambda concurrency metrics (${res.status})`);
+  return res.json();
+}
+

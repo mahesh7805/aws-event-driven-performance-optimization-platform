@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { execSync } from 'child_process';
 import { globalRepository } from '../repositories/repository.js';
 import { SerialProcessor } from '../services/serialProcessor.js';
 import { ParallelProcessor } from '../services/parallelProcessor.js';
@@ -217,3 +218,51 @@ apiRouter.post('/failure-lab/simulate', async (req: Request, res: Response) => {
     res.status(400).json({ error: error.message || 'Invalid scenario' });
   }
 });
+
+// GET /api/metrics/lambda-concurrency (Temporary Diagnostic Metric for Concurrency Test)
+apiRouter.get('/metrics/lambda-concurrency', async (_req: Request, res: Response) => {
+  try {
+    const functionName = 'aws-event-driven-platform-worker-dev';
+    const region = globalTerraformService.getAwsRegion();
+    const endTime = new Date().toISOString();
+    const startTime = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+    const cmd = `aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name ConcurrentExecutions --dimensions Name=FunctionName,Value=${functionName} --start-time ${startTime} --end-time ${endTime} --period 60 --statistics Maximum Average --region ${region}`;
+
+    const output = execSync(cmd, { encoding: 'utf-8', timeout: 5000 });
+    const data = JSON.parse(output);
+    const datapoints = (data.Datapoints || [])
+      .map((d: any) => ({
+        timestamp: d.Timestamp,
+        maximum: d.Maximum ?? 0,
+        average: Math.round((d.Average ?? 0) * 100) / 100,
+        unit: d.Unit,
+      }))
+      .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    const peakMaximum = datapoints.length > 0 ? Math.max(...datapoints.map((d: any) => d.maximum)) : 0;
+    const latestMaximum = datapoints.length > 0 ? datapoints[0].maximum : 0;
+
+    res.json({
+      functionName,
+      region,
+      targetConcurrency: 10,
+      peakMaximum,
+      latestMaximum,
+      datapoints,
+      queryTime: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(200).json({
+      functionName: 'aws-event-driven-platform-worker-dev',
+      region: globalTerraformService.getAwsRegion(),
+      targetConcurrency: 10,
+      peakMaximum: 0,
+      latestMaximum: 0,
+      datapoints: [],
+      error: err.message || 'CloudWatch query unavailable',
+      queryTime: new Date().toISOString(),
+    });
+  }
+});
+
